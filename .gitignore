@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# venv
+venv/
+.env/
+
+# IDE
+.vscode/
+
+# OS
+.DS_Store
+
+# data (если не хочешь пушить)
+data/raw/
+
+# index
+index/
