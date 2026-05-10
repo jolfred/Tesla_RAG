@@ -3,8 +3,8 @@ from .read_docx import read_docx
 from .read_pdf import read_pdf
 from .read_txt import read_txt
 
-def load_file(path):
-    ext = os.path.splitext(path)[1]
+def load_file(path: str) -> str:
+    ext = os.path.splitext(path)[1].lower()
 
     if ext == ".pdf":
         return read_pdf(path)
