@@ -14,8 +14,8 @@ from src.preprocessing.union_bilder import build_document_collection
 from src.utils.logger import setup_logger
 
 
-logger = setup_logger("main_pipeline")
 
+logger = setup_logger("main_pipeline")
 def main():
     logger.info("Запуск пайплайна сборки документов...")
     
