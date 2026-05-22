@@ -22,6 +22,7 @@ def test_split_text_with_overlap():
     
     assert len(chunks) >= 2
     # Слово word2 должно быть и в конце первого чанка, и в начале второго
+    print(chunks)
     assert "word2" in chunks[0]
     assert "word2" in chunks[1]
 

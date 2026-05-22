@@ -21,7 +21,6 @@ LOG_FILE = LOGS_DIR / "app.log"
 CHUNK_SIZE = 800     # Желаемый размер куска в символах
 CHUNK_OVERLAP = 150  # Нахлест между кусками, чтобы не терять контекст
 
-# Настройки поиска
 SUPPORTED_EXTENSIONS = {'.pdf', '.docx', '.txt'}
 
 # Создаем папки

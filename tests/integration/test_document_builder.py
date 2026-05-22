@@ -1,10 +1,6 @@
 import json
-from src.utils.hashing import calculate_md5
-from src.preprocessing.union_bilder import  (
-    load_registry, 
-    save_registry, 
-    load_json_database, 
-    save_json_database,
+from src.utils.get_files_hash import calculate_md5
+from src.preprocessing.union_builder import  (
     build_document_collection  # Импортируем нашу главную функцию
 )
 
