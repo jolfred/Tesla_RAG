@@ -21,3 +21,6 @@ index/
 
 logs/
 data/
+
+# Локальные AI модели
+models/

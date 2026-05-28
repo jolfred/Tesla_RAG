@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
 from unittest.mock import patch, MagicMock
-from src.vectorization.searcher import SemanticSearcher
+from src.vectorization.searcher import Searcher
 
 @patch("src.vectorization.searcher.SentenceTransformer")
 @patch("src.vectorization.searcher.QdrantClient")
@@ -29,7 +29,7 @@ def test_semantic_search_top_k(mock_qdrant_class, mock_transformer_class):
     mock_qdrant_class.return_value = mock_qdrant
 
     # 2. ДЕЙСТВИЕ
-    searcher = SemanticSearcher()
+    searcher = Searcher()
     results = searcher.search(query="Тестовый запрос", top_k=2)
 
     # 3. ПРОВЕРКИ
