@@ -1,6 +1,9 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
+# Загружаем переменные окружения из .env файла
+load_dotenv()
 # Корень проекта
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -18,8 +21,8 @@ LOGS_DIR = BASE_DIR / "logs"
 LOG_FILE = LOGS_DIR / "app.log"
 
 # Параметры нарезки (Chunking)
-CHUNK_SIZE = 800     # Желаемый размер куска в символах
-CHUNK_OVERLAP = 150  # Нахлест между кусками, чтобы не терять контекст
+CHUNK_SIZE = 400     # Желаемый размер куска в символах
+CHUNK_OVERLAP = 50  # Нахлест между кусками, чтобы не терять контекст
 
 SUPPORTED_EXTENSIONS = {'.pdf', '.docx', '.txt'}
 
@@ -30,7 +33,8 @@ for path in [DATA_RAW_DIR, DATA_PROCESSED_DIR, LOGS_DIR]:
     # --- НАСТРОЙКИ ВЕКТОРНОЙ БАЗЫ И EMBEDDINGS ---
 
 # Выбор модели
-EMBEDDING_MODEL_NAME = "cointegrated/rubert-tiny2"
+EMBEDDING_MODEL_NAME = str(BASE_DIR / "models" / "rubert-tiny2")
+# EMBEDDING_MODEL_NAME = "cointegrated/rubert-tiny2"
 VECTOR_SIZE = 312  # Для rubert-tiny2 размер вектора всегда 312
 
 # Настройки Qdrant
@@ -43,3 +47,4 @@ COLLECTION_NAME = "knowledge_base"
 # Убедимся, что папка для локального Qdrant существует
 if QDRANT_MODE == "local":
     QDRANT_LOCAL_PATH.mkdir(parents=True, exist_ok=True)
+
