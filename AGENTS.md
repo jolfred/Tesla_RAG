@@ -30,7 +30,28 @@ setsid nohup .venv/bin/python -m backend.indexer.indexer $(ls storage/posts/post
 
 # Скрапер (метаданные групп и посты VK)
 .venv/bin/python -m scraper.main --url-file storage/posts/group_links.txt --meta
+
+# Фронтенд (сборка ТОЛЬКО через Docker, Node на хосте не ставится)
+docker run --rm -v $PWD/frontend:/app -v graphrag_npm_cache:/root/.npm -w /app node:20-alpine sh -c "npm ci && npm run build"
+# локальная разработка (Vite на 5173, прокси /api -> :8000):
+docker run --rm -p 5173:5173 -v $PWD/frontend:/app -v graphrag_npm_cache:/root/.npm -w /app node:20-alpine sh -c "npm ci && npm run dev"
+# тесты фронтенда (Vitest, jsdom):
+docker run --rm -v $PWD/frontend:/app -v graphrag_npm_cache:/root/.npm -w /app node:20-alpine sh -c "npm ci && npm test"
 ```
+
+## M1: Сессии и фронтенд (bearer-токены)
+
+- **Авторизация** — opaque-токен (не cookie/JWT). Сервер хранит только SHA-256 хэш в SQLite `storage/sessions.db` (таблица `sessions`), TTL = `SESSION_TTL` суток (по умолчанию 30). Клиент шлёт токен в заголовке `Authorization: Bearer <token>`. X-API-Key (USER/ADMIN) продолжает работать на `/api/v1/chat` без изменений.
+- **Эндпоинты /auth** (модуль `backend/api/sessions.py`, роут `backend/api/routes/auth.py`):
+  - `POST /api/v1/auth/guest` → `{token, role:"user", expires_at}` — вход без логина (FR-1.1).
+  - `POST /api/v1/auth/admin {api_key}` → токен `role="admin"` при совпадении с `ADMIN_API_KEY` (hmac.compare_digest), иначе 401 (FR-1.2).
+  - `GET /api/v1/auth/me` (Bearer) → `{role, vk_user_id, expires_at}`; невалидный/истёкший → 401 (FR-1.3). Фронтенд при 401 тихо перевыдаёт гостевой токен.
+  - `POST /api/v1/auth/logout` (Bearer) → отзыв токена (удаление из БД) (FR-1.4).
+  - `POST /api/v1/auth/vk {params, sign}` → VK-вход с проверкой подписи launch-параметров (HMAC-SHA256 на `VK_APP_SECRET`, официальный алгоритм VK); роль по allowlist `VK_ADMIN_IDS`; при пустом секрете → 501 (FR-1.8, «спит» до создания приложения в dev.vk.com).
+- **Фронтенд**: `frontend/` (Vite + React + TS + VKUI + vk-bridge). Сборка только через Docker (`npm ci && npm run build`), готовая статика в `frontend/dist/`. FastAPI раздаёт `/assets/*` и отдаёт `index.html` для не-API GET-путей (SPA-fallback); `/api/*`, `/docs`, `/openapi.json`, `/redoc` не перехватываются. Собранную статику в docker-compose можно смонтировать: `./frontend/dist:/app/frontend/dist`.
+- **Модуль аутентификации фронта**: `frontend/src/auth/` (authContext + `localStorage`), `frontend/src/api/client.ts` (Bearer-инжекция + авто-перевыдача гостя при 401), `frontend/src/types.ts` (единый источник истины контрактов API). Экраны: Чат (`src/pages/ChatPage.tsx`), Статус (`src/pages/StatusPage.tsx`, вход/выход админа).
+- **Новые переменные .env**: `SESSION_TTL` (30), `VK_APP_ID` (пусто), `VK_APP_SECRET` (пусто → VK-вход неактивен), `VK_ADMIN_IDS` (CSV).
+- **Тесты M1**: `backend/api/test_sessions.py`, `backend/api/test_auth.py` (вкл. тест-векторы VK sign, Bearer vs X-API-Key на `/chat`). Админ-роуты (`documents/index/communities`) по-прежнему только X-API-Key; Bearer-зависимость `verify_admin_session` готова к M2.
 
 ## Критические нюансы
 
