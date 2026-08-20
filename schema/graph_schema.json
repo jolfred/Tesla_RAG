@@ -1,0 +1,36 @@
+{
+  "nodes": [
+    {"type": "Organization", "description": "Организация (КГЭУ, Штаб СО)"},
+    {"type": "Squad", "description": "Студенческий отряд"},
+    {"type": "Person", "description": "Человек (командир, боец, ветеран)"},
+    {"type": "Event", "description": "Мероприятие"},
+    {"type": "Publication", "description": "Публикация (пост из соцсетей)"},
+    {"type": "Document", "description": "Документ (положение, устав)"},
+    {"type": "Achievement", "description": "Достижение, награда"},
+    {"type": "Project", "description": "Проект"},
+    {"type": "Direction", "description": "Направление деятельности"},
+    {"type": "Tradition", "description": "Традиция"},
+    {"type": "Location", "description": "Место проведения"}
+  ],
+  "relations": [
+    {"from": "Person", "relation": "MEMBER_OF", "to": "Squad"},
+    {"from": "Person", "relation": "COMMANDED", "to": "Squad"},
+    {"from": "Person", "relation": "AWARDED", "to": "Achievement"},
+    {"from": "Squad", "relation": "PARTICIPATED_IN", "to": "Event"},
+    {"from": "Person", "relation": "PARTICIPATED_IN", "to": "Event"},
+    {"from": "Event", "relation": "ORGANIZED_BY", "to": "Organization"},
+    {"from": "Event", "relation": "ORGANIZED_BY", "to": "Squad"},
+    {"from": "Event", "relation": "DESCRIBED_BY", "to": "Publication"},
+    {"from": "Publication", "relation": "DESCRIBES", "to": "Event"},
+    {"from": "Publication", "relation": "DESCRIBES", "to": "Person"},
+    {"from": "Publication", "relation": "DESCRIBES", "to": "Squad"},
+    {"from": "Publication", "relation": "MENTIONS", "to": "Person"},
+    {"from": "Event", "relation": "HELD_AT", "to": "Location"},
+    {"from": "Project", "relation": "INCLUDES", "to": "Event"},
+    {"from": "Squad", "relation": "PART_OF", "to": "Organization"},
+    {"from": "Direction", "relation": "PART_OF", "to": "Organization"},
+    {"from": "Squad", "relation": "HAS_TRADITION", "to": "Tradition"},
+    {"from": "Publication", "relation": "RELATES_TO", "to": "Direction"},
+    {"from": "Publication", "relation": "RELATES_TO", "to": "Project"}
+  ]
+}

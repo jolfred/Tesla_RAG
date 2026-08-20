@@ -1,0 +1,27 @@
+# Core
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.9.0
+python-dotenv>=1.0.0
+
+# Vector DB
+qdrant-client>=1.11.0
+
+# Graph DB
+neo4j>=5.24.0
+
+# Embeddings
+sentence-transformers>=3.0.0
+torch>=2.5.0
+transformers>=4.44.0
+numpy>=1.26.0
+
+# LLM
+openai>=1.0.0
+
+# Document loading
+pdfplumber>=0.11.0
+python-docx>=1.1.0
+
+# Utils
+Pillow>=10.4.0
