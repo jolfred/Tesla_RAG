@@ -10,11 +10,27 @@ export function isVK(): boolean {
   return typeof window !== 'undefined' && !!window.vkBridge
 }
 
-export async function initVK(): Promise<void> {
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('VK bridge timeout')), ms)
+    promise.then(
+      (v) => {
+        clearTimeout(timer)
+        resolve(v)
+      },
+      (e) => {
+        clearTimeout(timer)
+        reject(e)
+      },
+    )
+  })
+}
+
+export async function initVK(timeoutMs = 5000): Promise<void> {
   if (!isVK()) {
     return
   }
-  await window.vkBridge!.send('VKWebAppInit')
+  await withTimeout(window.vkBridge!.send('VKWebAppInit'), timeoutMs)
 }
 
 export interface VKLaunchParams {
