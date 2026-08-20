@@ -1,11 +1,12 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from backend.api.auth import verify_user_any
 from backend.api.schemas.chat import ChatRequest, ChatResponse, SourceInfo
 from backend.rag.searcher import GraphRAGSearcher
 from backend.utils.logger import setup_logger
 
 logger = setup_logger("chat_route")
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(verify_user_any)])
 _searcher = None
 
 
