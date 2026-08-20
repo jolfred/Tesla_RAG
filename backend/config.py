@@ -11,6 +11,8 @@ STORAGE_DIR = BASE_DIR / "storage"
 DOCUMENTS_DIR = STORAGE_DIR / "documents"
 IMAGES_DIR = STORAGE_DIR / "images"
 SCHEMA_DIR = BASE_DIR / "schema"
+SESSIONS_DB = STORAGE_DIR / "sessions.db"
+FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
 
 for p in [DOCUMENTS_DIR, IMAGES_DIR]:
     p.mkdir(parents=True, exist_ok=True)
@@ -71,6 +73,12 @@ GIGACHAT_MODEL = os.getenv("GIGACHAT_MODEL", "GigaChat-2-Pro")
 # API Keys
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "admin-secret-key-change-me")
 USER_API_KEY = os.getenv("USER_API_KEY", "user-secret-key-change-me")
+
+# Sessions (opaque Bearer-токены)
+SESSION_TTL = int(os.getenv("SESSION_TTL", "30"))  # суток
+VK_APP_ID = os.getenv("VK_APP_ID", "")
+VK_APP_SECRET = os.getenv("VK_APP_SECRET", "")
+VK_ADMIN_IDS = {x.strip() for x in os.getenv("VK_ADMIN_IDS", "").split(",") if x.strip()}
 
 if QDRANT_MODE == "local":
     QDRANT_LOCAL_PATH.mkdir(parents=True, exist_ok=True)
