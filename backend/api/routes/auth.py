@@ -11,7 +11,7 @@ from backend.api.schemas.auth import (
     VkRequest,
 )
 from backend.api.sessions import store
-from backend.config import ADMIN_API_KEY, VK_ADMIN_IDS, VK_APP_SECRET
+from backend.config import ADMIN_API_KEY, VK_ADMIN_IDS, VK_APP_ID, VK_APP_SECRET
 from backend.utils.logger import setup_logger
 
 logger = setup_logger("auth_route")
@@ -40,6 +40,9 @@ async def auth_vk(body: VkRequest):
         raise HTTPException(status_code=501, detail="VK auth is not configured")
     if not verify_vk_sign(body.params, body.sign, VK_APP_SECRET):
         raise HTTPException(status_code=401, detail="Invalid VK signature")
+    expected_app_id = str(VK_APP_ID).removeprefix("app")
+    if expected_app_id and str(body.params.get("vk_app_id", "")) != expected_app_id:
+        raise HTTPException(status_code=401, detail="Invalid VK app id")
     vk_user_id = body.params.get("vk_user_id")
     role = "admin" if vk_user_id in VK_ADMIN_IDS else "user"
     return AuthResponse(**store.create(role, vk_user_id))

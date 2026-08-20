@@ -37,6 +37,7 @@ def test_config(monkeypatch):
     monkeypatch.setattr("backend.api.auth.ADMIN_API_KEY", ADMIN_KEY)
     monkeypatch.setattr("backend.api.auth.USER_API_KEY", USER_KEY)
     monkeypatch.setattr("backend.api.routes.auth.ADMIN_API_KEY", ADMIN_KEY)
+    monkeypatch.setattr("backend.api.routes.auth.VK_APP_ID", "app1")
     monkeypatch.setattr("backend.api.routes.auth.VK_APP_SECRET", "test_vk_secret")
     monkeypatch.setattr("backend.api.routes.auth.VK_ADMIN_IDS", {"123456789"})
 
@@ -182,6 +183,14 @@ def test_vk_sign_tampered_sign_401():
         "/api/v1/auth/vk",
         json={"params": VK_PARAMS, "sign": VK_SIGN[:-1] + ("0" if VK_SIGN[-1] != "0" else "1")},
     )
+    assert resp.status_code == 401
+
+
+def test_vk_wrong_app_id_401():
+    # Валидная подпись для params с vk_app_id=2, но приложение в конфиге app1 -> 401
+    params = dict(VK_PARAMS, vk_app_id="2")
+    sign = "ac7d892bb87062a278f76e971279b2f3295ca52f711080931031d1de9b5dcf88"
+    resp = client.post("/api/v1/auth/vk", json={"params": params, "sign": sign})
     assert resp.status_code == 401
 
 
