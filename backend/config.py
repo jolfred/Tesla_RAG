@@ -17,12 +17,6 @@ FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
 for p in [DOCUMENTS_DIR, IMAGES_DIR]:
     p.mkdir(parents=True, exist_ok=True)
 
-# Chunking
-CHUNK_SIZE = 700
-CHUNK_OVERLAP = 100
-
-SUPPORTED_EXTENSIONS = {'.pdf', '.docx', '.txt', '.json'}
-
 # Embedding model
 EMBEDDING_MODEL_NAME = "intfloat/multilingual-e5-small"
 VECTOR_SIZE = 384
@@ -50,21 +44,14 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct-q4_k_m")
 # ProxyAPI (https://proxyapi.ru — доступ к Gemini, GPT и др. из РФ, рубли)
 PROXYAPI_KEY = os.getenv("PROXYAPI_KEY", "")
 PROXYAPI_BASE_URL = os.getenv("PROXYAPI_BASE_URL", "https://openai.api.proxyapi.ru/v1")
-PROXYAPI_MODEL = os.getenv("PROXYAPI_MODEL", "gemini/gemini-2.5-flash-lite")
 
-# Google AI Studio (Gemini) — OpenAI-совместимый эндпоинт
+# Google AI Studio — ключ для Gemma-клиента
 GOOGLE_AI_STUDIO_KEY = os.getenv("GOOGLE_AI_STUDIO_KEY", "")
-GOOGLE_BASE_URL = os.getenv("GOOGLE_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
-GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "gemini-3.5-flash")
 
-# Google AI Studio (Gemma) — отдельный клиент и модель
+# Gemma (Google AI Studio, OpenAI-совместимый эндпоинт)
 GEMMA_BASE_URL = os.getenv("GEMMA_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
 GEMMA_MODEL = os.getenv("GEMMA_MODEL", "gemma-4-31b-it")
 GEMMA_RPM = int(os.getenv("GEMMA_RPM", "30"))
-
-# llama.cpp llama-server (локальный, OpenAI-совместимый)
-LLAMACPP_BASE_URL = os.getenv("LLAMACPP_BASE_URL", "http://localhost:8080/v1")
-LLAMACPP_MODEL = os.getenv("LLAMACPP_MODEL", "saiga_llama3_8b")
 
 # GigaChat (Сбер, OpenAI-совместимый)
 GIGACHAT_AUTH_KEY = os.getenv("GIGACHAT_AUTH_KEY", "")

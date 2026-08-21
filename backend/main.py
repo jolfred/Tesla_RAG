@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from backend.api.auth import verify_user
-from backend.api.routes import auth, chat, communities, documents, index, status
+from backend.api.routes import auth, chat, communities, documents, status
 from backend.config import FRONTEND_DIST
 from backend.utils.logger import setup_logger
 
@@ -33,7 +33,6 @@ app.include_router(chat.router, tags=["chat"])
 # Admin-protected endpoints
 from backend.api.auth import verify_admin
 app.include_router(documents.router, dependencies=[Depends(verify_admin)], tags=["documents"])
-app.include_router(index.router, dependencies=[Depends(verify_admin)], tags=["index"])
 app.include_router(communities.router, dependencies=[Depends(verify_admin)], tags=["graph"])
 
 # Frontend: статические ассеты (FR-2.2)
