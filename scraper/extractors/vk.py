@@ -1,32 +1,17 @@
 import logging
-import re
 import time
 from collections.abc import Iterable
-from datetime import datetime, timezone
-from urllib.parse import urlparse
+from datetime import datetime
 
 import vk_api
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from vk_api.exceptions import VkApiError
 
 from scraper.extractors.base import BaseExtractor
+from scraper.extractors.vk_parsers import extract_domain, parse_attachments, post_timestamp, post_url, wall_url
+from scraper.extractors.vk_retry import VkRateLimitError, raise_if_retryable, vk_retry
 
 
 logger = logging.getLogger("scraper.extractors.vk")
-
-RETRYABLE_VK_CODES = {6, 9, 29}
-
-
-class VkRateLimitError(Exception):
-    pass
-
-
-vk_retry = retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=1, max=10),
-    retry=retry_if_exception_type((ConnectionError, TimeoutError, VkRateLimitError)),
-    reraise=True,
-)
 
 
 class VkApiExtractor(BaseExtractor):
@@ -37,7 +22,7 @@ class VkApiExtractor(BaseExtractor):
         self.last_timestamp: datetime | None = None
 
     def resolve_group(self, url_or_domain: str) -> dict:
-        domain = self._extract_domain(url_or_domain)
+        domain = extract_domain(url_or_domain)
         resolved = self.api.utils.resolveScreenName(screen_name=domain)
         if resolved is None:
             raise ValueError(f"Группа с доменом '{domain}' не найдена")
@@ -121,7 +106,7 @@ class VkApiExtractor(BaseExtractor):
         logger.info("Парсинг завершён: %d постов", fetched)
 
     def _process_post(self, post: dict, domain: str, last_timestamp: datetime | None) -> bool | None:
-        post_date = datetime.fromtimestamp(post["date"], tz=timezone.utc)
+        post_date = post_timestamp(post)
         if last_timestamp and post_date <= last_timestamp:
             return None
         text = (post.get("text") or "").strip()
@@ -133,15 +118,13 @@ class VkApiExtractor(BaseExtractor):
                 if orig_text:
                     orig_owner = original.get("owner_id", 0)
                     orig_id = original.get("id", 0)
-                    orig_url = f"https://vk.com/wall{orig_owner}_{orig_id}"
-                    logger.info("Репост из: %s", orig_url)
+                    logger.info("Репост из: %s", wall_url(orig_owner, orig_id))
                     if self.last_timestamp is None or post_date < self.last_timestamp:
                         self.last_timestamp = post_date
                     return True
             assert self._group_info is not None
             owner_id = post.get("owner_id", self._group_info["owner_id"])
-            url = f"https://vk.com/{domain}?w=wall{owner_id}_{post['id']}"
-            logger.warning("Пропущен пустой пост: %s", url)
+            logger.warning("Пропущен пустой пост: %s", post_url(domain, owner_id, post["id"]))
             return False
         if self.last_timestamp is None or post_date < self.last_timestamp:
             self.last_timestamp = post_date
@@ -208,16 +191,14 @@ class VkApiExtractor(BaseExtractor):
         try:
             return self.api.wall.get(owner_id=owner_id, offset=offset, count=count)
         except VkApiError as e:
-            if e.code in RETRYABLE_VK_CODES:
-                logger.warning("Retry [1/3]: ошибка %d (%s)", e.code, e)
-                raise VkRateLimitError(str(e)) from e
+            raise_if_retryable(e)
             raise
 
     def _parse_post(self, post: dict, domain: str) -> dict:
         assert self._group_info is not None
         post_id = post["id"]
         owner_id = post.get("owner_id", self._group_info["owner_id"])
-        published = datetime.fromtimestamp(post["date"], tz=timezone.utc)
+        published = post_timestamp(post)
 
         text = post.get("text") or ""
         attachments = list(post.get("attachments", []))
@@ -229,7 +210,7 @@ class VkApiExtractor(BaseExtractor):
             orig_attachments = original.get("attachments", [])
             attachments.extend(orig_attachments)
 
-        photos, links, docs = self._parse_attachments(attachments)
+        photos, links, docs = parse_attachments(attachments)
 
         return {
             "post_id": str(post_id),
@@ -237,7 +218,7 @@ class VkApiExtractor(BaseExtractor):
             "group_id": str(self._group_info["group_id"]),
             "group_name": self._group_info["group_name"],
             "group_domain": self._group_info["group_domain"],
-            "post_url": f"https://vk.com/{domain}?w=wall{owner_id}_{post_id}",
+            "post_url": post_url(domain, owner_id, post_id),
             "published_at": published.isoformat(),
             "text_raw": text,
             "text_clean": "",
@@ -249,35 +230,3 @@ class VkApiExtractor(BaseExtractor):
                 "docs": docs,
             },
         }
-
-    @staticmethod
-    def _parse_attachments(attachments: list) -> tuple[list[str], list[str], list[str]]:
-        photos: list[str] = []
-        links: list[str] = []
-        docs: list[str] = []
-
-        for att in attachments:
-            typ = att.get("type")
-            if typ == "photo":
-                sizes = att["photo"].get("sizes", [])
-                if sizes:
-                    best = max(sizes, key=lambda s: s.get("width", 0) * s.get("height", 0))
-                    photos.append(best["url"])
-            elif typ == "link":
-                url = att["link"].get("url")
-                if url:
-                    links.append(url)
-            elif typ == "doc":
-                url = att["doc"].get("url")
-                if url:
-                    docs.append(url)
-
-        return photos, links, docs
-
-    @staticmethod
-    def _extract_domain(url_or_domain: str) -> str:
-        parsed = urlparse(url_or_domain)
-        if parsed.netloc:
-            path = parsed.path.strip("/")
-            return path.split("/")[0] if path else parsed.netloc.split(".")[0]
-        return url_or_domain.split("/")[0].split("?")[0]
