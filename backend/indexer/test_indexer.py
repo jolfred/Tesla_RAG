@@ -6,13 +6,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
-from backend.indexer.indexer import (
-    _build_embedding_text,
-    _build_post_prompt,
-    extract_graph_from_post,
-    filter_posts,
-    save_to_neo4j,
-)
+from backend.indexer.extractors import extract_graph_from_post
+from backend.indexer.neo4j_writer import save_to_neo4j
+from backend.indexer.posts import build_embedding_text, filter_posts
+from backend.indexer.prompts import build_post_prompt
 from backend.indexer.schemas import (
     Entity,
     EntityType,
@@ -158,7 +155,7 @@ class TestSaveToNeo4jMock:
 
 
 class TestExtractGraphErrorHandling:
-    @patch("backend.indexer.indexer.logger")
+    @patch("backend.indexer.extractors.logger")
     def test_api_error_returns_empty_result(self, mock_logger):
         mock_client = MagicMock()
         mock_client.chat.completions.create.side_effect = Exception("API Error")
@@ -175,7 +172,7 @@ class TestExtractGraphErrorHandling:
         assert result.relationships == []
         mock_logger.exception.assert_called_once()
 
-    @patch("backend.indexer.indexer.logger")
+    @patch("backend.indexer.extractors.logger")
     def test_empty_text_returns_empty_result(self, mock_logger):
         mock_client = MagicMock()
         post = {"post_id": "42", "text_clean": ""}
@@ -186,7 +183,7 @@ class TestExtractGraphErrorHandling:
         assert result.relationships == []
         mock_client.chat.completions.create.assert_not_called()
 
-    @patch("backend.indexer.indexer.logger")
+    @patch("backend.indexer.extractors.logger")
     def test_malformed_json_response_handled(self, mock_logger):
         mock_client = MagicMock()
         mock_response = MagicMock()
@@ -218,7 +215,7 @@ class TestBuildPostPrompt:
             ],
             "text_clean": "Отличный день!",
         }
-        prompt = _build_post_prompt(post)
+        prompt = build_post_prompt(post)
         assert "Group: Тесла" in prompt
         assert "Published: 2026-06-01T10:00:00Z" in prompt
         assert "URL: https://vk.com/test" in prompt
@@ -228,7 +225,7 @@ class TestBuildPostPrompt:
 
     def test_missing_fields_omitted(self):
         post = {"post_id": "2", "text_clean": "Просто текст"}
-        prompt = _build_post_prompt(post)
+        prompt = build_post_prompt(post)
         assert "--- POST METADATA ---" in prompt
         assert "Group:" not in prompt
         assert "Mentions:" not in prompt
@@ -240,10 +237,10 @@ class TestBuildPostPrompt:
             "mentions": [],
             "text_clean": "Без упоминаний",
         }
-        prompt = _build_post_prompt(post)
+        prompt = build_post_prompt(post)
         assert "Mentions:" not in prompt
 
-    @patch("backend.indexer.indexer.logger")
+    @patch("backend.indexer.extractors.logger")
     def test_llm_receives_enriched_prompt(self, mock_logger):
         mock_extractor = MagicMock()
         mock_extractor.extract_json.return_value = {
@@ -274,15 +271,15 @@ class TestBuildEmbeddingText:
             "group_name": "Студенческие отряды КГЭУ «Тесла»",
             "text_clean": "Всем привет!",
         }
-        result = _build_embedding_text(post)
+        result = build_embedding_text(post)
         assert result == "Студенческие отряды КГЭУ «Тесла»: Всем привет!"
 
     def test_no_group_fallback(self):
         post = {"text_clean": "Только текст"}
-        result = _build_embedding_text(post)
+        result = build_embedding_text(post)
         assert result == "Только текст"
 
     def test_empty_text(self):
         post = {"group_name": "Группа", "text_clean": ""}
-        result = _build_embedding_text(post)
+        result = build_embedding_text(post)
         assert result == "Группа: "
