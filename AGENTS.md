@@ -11,6 +11,17 @@ GraphRAG-сервис для Штаба СО КГЭУ «Тесла». VK-пос�
 # Индексация постов в Neo4j + Qdrant (ресюм: пропускает уже проиндексированные)
 .venv/bin/python -m backend.indexer.indexer storage/posts/posts_*.jsonl --model gigachat --min-date ''
 
+# Индексация v2 через LLMGraphTransformer (онтология v2, source_model='llmgraph_gigachat',
+# настоящие метки :Person/:Squad/..., рёбра настоящими типами, provenance из кода).
+# --force в v2-режиме делает resume по :Post-узлам графа (не пережигает GigaChat).
+.venv/bin/python -m backend.indexer.indexer storage/posts/posts_rso_tesla.jsonl --model gigachat --min-date 2026-01-01 --extractor transformer --force
+
+# Метрики ветки графа (legacy=gigachat, v2=llmgraph_gigachat)
+.venv/bin/python -m backend.scripts.pilot_metrics --model llmgraph_gigachat
+
+# Сид метаданных групп в граф v2 (HQ/отряды/контакты + Qdrant-карточки, идемпотентно)
+.venv/bin/python -m backend.indexer.group_indexer_v2
+
 # Фоновый запуск (без setsid процесс умирает вместе с терминалом!)
 setsid nohup .venv/bin/python -m backend.indexer.indexer $(ls storage/posts/posts_*.jsonl | grep -v kgeu_official | tr '\n' ' ') --model gigachat --min-date '' > storage/logs/index_all_gigachat.log 2>&1 < /dev/null & disown
 

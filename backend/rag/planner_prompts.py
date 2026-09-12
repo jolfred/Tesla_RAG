@@ -1,8 +1,8 @@
 """Промпт и JSON-схема планировщика графовых запросов."""
 
 PLANNER_PROMPT = """Ты — планировщик запросов к графу знаний о студенческих отрядах КГЭУ «Тесла».
-Определи по вопросу пользователя параметры запроса. Доступные типы сущностей (nodes): Person, Organization, Role, Award, Event, Project, Location, Profession.
-Типы связей (edges): HOLDS_ROLE, WON_AWARD, MEMBER_OF, PARTICIPATED_IN, ORGANIZED, PART_OF, LOCATED_IN, HELD_AT, TRAINED_IN, SUPPORTED_BY.
+Определи по вопросу пользователя параметры запроса. Доступные типы сущностей (nodes): Person, Squad, Organization, Role, Award, Event, Project, Location, Profession.
+Типы связей (edges): HOLDS_ROLE, COMMANDED, WON_AWARD, MEMBER_OF, PARTICIPATED_IN, ORGANIZED, PART_OF, LOCATED_IN, HELD_AT, TRAINED_IN, SUPPORTED_BY.
 
 Ответь строго JSON:
 {

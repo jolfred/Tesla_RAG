@@ -1,10 +1,14 @@
-"""Cypher-шаблоны для интентов планировщика.
+"""Cypher-шаблоны для интентов планировщика (граф v2).
 
-Каждая функция принимает план (dict) и возвращает (query, params) либо None
-(тогда выполняется следующий кандидат / generic-фолбэк).
+Онтология v2: настоящие метки (:Person/:Squad/...) и настоящие типы рёбер
+([:MEMBER_OF], [:PART_OF], ...), ветка source_model='llmgraph_gigachat'.
+Legacy-стиль (:Entity {type:...} + [:RELATES {type:...}]) больше не используется:
+ветка 'gigachat' удалена.
 """
 
 from typing import Optional
+
+MODEL = "llmgraph_gigachat"
 
 
 def _limit(plan: dict) -> int:
@@ -16,15 +20,15 @@ def units_query(plan: dict) -> Optional[tuple[str, dict]]:
         return None
     return (
         """
-        MATCH (h:Entity {type:"Organization"})-[r:RELATES {type:"PART_OF"}]->(u:Entity {type:"Organization"})
-        WHERE ($org IS NULL OR toLower(toString(h.id)) CONTAINS toLower($org))
-          AND u.org_type = 'lso'
-        RETURN DISTINCT u.id AS unit, u.org_type AS org_type, u.group_domain AS group_domain,
+        MATCH (u:Squad {source_model:$model})-[r:PART_OF]->(h)
+        WHERE h.source_model = $model
+          AND ($org IS NULL OR toLower(toString(h.name)) CONTAINS toLower($org))
+        RETURN DISTINCT u.name AS unit,
                collect(DISTINCT r.source_post_url) AS sources
-        ORDER BY u.id
+        ORDER BY u.name
         LIMIT $limit
         """,
-        {"org": plan.get("org_filter"), "limit": _limit(plan)},
+        {"model": MODEL, "org": plan.get("org_filter"), "limit": _limit(plan)},
     )
 
 
@@ -33,16 +37,17 @@ def events_in_period_query(plan: dict) -> Optional[tuple[str, dict]]:
         return None
     return (
         """
-        MATCH (e:Entity {type:"Event"})-[r:RELATES]-(o:Entity)
-        WHERE ($org IS NULL OR toLower(toString(o.id)) CONTAINS toLower($org))
+        MATCH (e:Event {source_model:$model})-[r]-(o)
+        WHERE ($org IS NULL OR toLower(toString(o.name)) CONTAINS toLower($org))
           AND ($pstart IS NULL OR coalesce(r.date,'9999') >= $pstart)
           AND ($pend IS NULL OR coalesce(r.date,'0000') <= $pend)
-        RETURN DISTINCT e.id AS event, e.description AS description,
-               collect(DISTINCT {rel: coalesce(r.type,''), date: r.date,
+        RETURN DISTINCT e.name AS event,
+               collect(DISTINCT {rel: type(r), date: r.date,
                                   source_post_url: r.source_post_url}) AS links
         LIMIT $limit
         """,
         {
+            "model": MODEL,
             "org": plan.get("org_filter"),
             "pstart": plan.get("period_start"),
             "pend": plan.get("period_end"),
@@ -56,14 +61,15 @@ def commanders_query(plan: dict) -> Optional[tuple[str, dict]]:
         return None
     return (
         """
-        MATCH (p:Entity)-[r:RELATES {type:"HOLDS_ROLE"}]->(o:Entity)
-        WHERE ($org IS NULL OR toLower(toString(o.id)) CONTAINS toLower($org))
-        RETURN p.id AS person, r.role_title AS role_title, r.status AS status,
-               r.date AS date, r.description AS description, r.source_post_url AS source_post_url
-        ORDER BY r.status = 'active' DESC, p.id
+        MATCH (p:Person {source_model:$model})-[r:COMMANDED|HOLDS_ROLE]->(o)
+        WHERE ($org IS NULL OR toLower(toString(o.name)) CONTAINS toLower($org))
+        RETURN p.name AS person, r.role_title AS role_title, r.status AS status,
+               r.date AS date, r.description AS description,
+               r.source_post_url AS source_post_url
+        ORDER BY p.name
         LIMIT $limit
         """,
-        {"org": plan.get("org_filter"), "limit": _limit(plan)},
+        {"model": MODEL, "org": plan.get("org_filter"), "limit": _limit(plan)},
     )
 
 
@@ -72,13 +78,13 @@ def members_query(plan: dict) -> Optional[tuple[str, dict]]:
         return None
     return (
         """
-        MATCH (p:Entity)-[r:RELATES {type:"MEMBER_OF"}]->(o:Entity)
-        WHERE ($org IS NULL OR toLower(toString(o.id)) CONTAINS toLower($org))
-        RETURN p.id AS person, o.id AS org, r.date AS date,
+        MATCH (p:Person {source_model:$model})-[r:MEMBER_OF]->(o)
+        WHERE ($org IS NULL OR toLower(toString(o.name)) CONTAINS toLower($org))
+        RETURN p.name AS person, o.name AS org, r.date AS date,
                r.description AS description, r.source_post_url AS source_post_url
         LIMIT $limit
         """,
-        {"org": plan.get("org_filter"), "limit": _limit(plan)},
+        {"model": MODEL, "org": plan.get("org_filter"), "limit": _limit(plan)},
     )
 
 
@@ -87,14 +93,14 @@ def winners_query(plan: dict) -> Optional[tuple[str, dict]]:
         return None
     return (
         """
-        MATCH (p:Entity)-[r:RELATES {type:"WON_AWARD"}]->(a:Entity)
-        WHERE ($org IS NULL OR toLower(toString(p.id)) CONTAINS toLower($org)
-               OR toLower(toString(a.id)) CONTAINS toLower($org))
-        RETURN p.id AS person, a.id AS award, r.date AS date,
+        MATCH (p:Person {source_model:$model})-[r:WON_AWARD]->(a)
+        WHERE ($org IS NULL OR toLower(toString(p.name)) CONTAINS toLower($org)
+               OR toLower(toString(a.name)) CONTAINS toLower($org))
+        RETURN p.name AS person, a.name AS award, r.date AS date,
                r.description AS description, r.source_post_url AS source_post_url
         LIMIT $limit
         """,
-        {"org": plan.get("org_filter"), "limit": _limit(plan)},
+        {"model": MODEL, "org": plan.get("org_filter"), "limit": _limit(plan)},
     )
 
 
@@ -103,16 +109,16 @@ def projects_query(plan: dict) -> Optional[tuple[str, dict]]:
         return None
     return (
         """
-        MATCH (pr:Entity {type:"Project"})
-        WHERE ($org IS NULL OR toLower(toString(pr.id)) CONTAINS toLower($org)
-               OR toLower(toString(pr.description)) CONTAINS toLower($org))
-        OPTIONAL MATCH (pr)-[r:RELATES]-(o:Entity)
-        RETURN pr.id AS project, pr.description AS description,
-               collect(DISTINCT {rel: coalesce(r.type,''), target: o.id,
-                                  date: r.date}) AS links
+        MATCH (pr:Project {source_model:$model})
+        WHERE ($org IS NULL OR toLower(toString(pr.name)) CONTAINS toLower($org))
+        OPTIONAL MATCH (pr)-[r]-(o)
+        RETURN pr.name AS project,
+               collect(DISTINCT {rel: type(r), target: o.name,
+                                  date: r.date,
+                                  source_post_url: r.source_post_url}) AS links
         LIMIT $limit
         """,
-        {"org": plan.get("org_filter"), "limit": _limit(plan)},
+        {"model": MODEL, "org": plan.get("org_filter"), "limit": _limit(plan)},
     )
 
 
@@ -121,11 +127,11 @@ def locations_query(plan: dict) -> Optional[tuple[str, dict]]:
         return None
     return (
         """
-        MATCH (l:Entity {type:"Location"})
-        RETURN l.id AS location, l.description AS description
+        MATCH (l:Location {source_model:$model})
+        RETURN l.name AS location
         LIMIT $limit
         """,
-        {"limit": _limit(plan)},
+        {"model": MODEL, "limit": _limit(plan)},
     )
 
 
@@ -134,13 +140,15 @@ def entity_detail_query(plan: dict) -> Optional[tuple[str, dict]]:
         return None
     return (
         """
-        MATCH (n:Entity {id:$name})
+        MATCH (n:Entity {source_model:$model})
+        WHERE toLower(toString(n.name)) CONTAINS toLower($name)
         OPTIONAL MATCH (n)-[r]-(m)
-        RETURN n.id AS id, n.type AS type, n.description AS description,
-               collect(DISTINCT {rel: coalesce(r.type,''), target: m.id,
-                                  date: r.date, source_post_url: r.source_post_url}) AS links
+        RETURN n.name AS id, n.type AS type,
+               collect(DISTINCT {rel: type(r), target: m.name,
+                                  date: r.date,
+                                  source_post_url: r.source_post_url}) AS links
         """,
-        {"name": plan["target_name"]},
+        {"model": MODEL, "name": plan["target_name"]},
     )
 
 
@@ -153,37 +161,37 @@ def _generic_queries(plan: dict) -> list[tuple[str, dict]]:
     if etype and tname:
         result.append((
             """
-            MATCH (n:Entity {type:$etype})
-            WHERE toLower(toString(n.id)) CONTAINS toLower($name)
+            MATCH (n:Entity {source_model:$model, type:$etype})
+            WHERE toLower(toString(n.name)) CONTAINS toLower($name)
             OPTIONAL MATCH (n)-[r]-(m)
-            RETURN n.id AS id, n.type AS type, n.description AS description,
-                   collect(DISTINCT {rel: coalesce(r.type,''), target: m.id,
+            RETURN n.name AS id, n.type AS type,
+                   collect(DISTINCT {rel: type(r), target: m.name,
                                       date: r.date}) AS links
             LIMIT $limit
             """,
-            {"etype": etype, "name": tname, "limit": limit},
+            {"model": MODEL, "etype": etype, "name": tname, "limit": limit},
         ))
     if etype:
         result.append((
             """
-            MATCH (n:Entity {type:$etype})
-            RETURN n.id AS id, n.description AS description
+            MATCH (n:Entity {source_model:$model, type:$etype})
+            RETURN n.name AS id
             LIMIT $limit
             """,
-            {"etype": etype, "limit": limit},
+            {"model": MODEL, "etype": etype, "limit": limit},
         ))
     if tname:
         result.append((
             """
-            MATCH (n:Entity)
-            WHERE toLower(toString(n.id)) CONTAINS toLower($name)
+            MATCH (n:Entity {source_model:$model})
+            WHERE toLower(toString(n.name)) CONTAINS toLower($name)
             OPTIONAL MATCH (n)-[r]-(m)
-            RETURN n.id AS id, n.type AS type, n.description AS description,
-                   collect(DISTINCT {rel: coalesce(r.type,''), target: m.id,
+            RETURN n.name AS id, n.type AS type,
+                   collect(DISTINCT {rel: type(r), target: m.name,
                                       date: r.date}) AS links
             LIMIT $limit
             """,
-            {"name": tname, "limit": limit},
+            {"model": MODEL, "name": tname, "limit": limit},
         ))
     return result
 

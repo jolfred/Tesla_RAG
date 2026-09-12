@@ -76,6 +76,18 @@ class AnswerGenerator:
                 dates = sorted({l.get("date") for l in f["links"] if l.get("date")})
                 if dates:
                     line += f" | даты: {', '.join(d[:10] for d in dates[:5])}"
+            urls = []
+            if f.get("source_post_url"):
+                urls.append(f["source_post_url"])
+            for l in (f.get("links") or []):
+                u = l.get("source_post_url")
+                if u and u not in urls:
+                    urls.append(u)
+            for s in (f.get("sources") or []):
+                if s and s not in urls:
+                    urls.append(s)
+            if urls:
+                line += f" | источники: {', '.join(urls[:3])}"
             lines.append("- " + line)
         return "\n".join(lines)
 
@@ -88,7 +100,11 @@ class AnswerGenerator:
             rel = l.get("rel") or l.get("rtype") or ""
             tgt = l.get("target") or l.get("target_id") or ""
             date = l.get("date")
-            parts.append(f"{rel}{' → ' + tgt if tgt else ''}{' (' + date + ')' if date else ''}")
+            url = l.get("source_post_url")
+            part = f"{rel}{' → ' + tgt if tgt else ''}{' (' + date[:10] + ')' if date else ''}"
+            if url:
+                part += f" [{url}]"
+            parts.append(part)
         return "; ".join(parts)
 
     def generate(
@@ -152,7 +168,6 @@ class AnswerGenerator:
 
         context = "\n\n".join(sections) if sections else "Контекст отсутствует."
         user_msg = f"Вопрос: {question}\n\n{context}\n\nОтветь на вопрос пользователя."
-
         try:
             return client.chat(
                 [

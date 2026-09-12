@@ -60,6 +60,8 @@ def process_indexer(
     model: str = "gigachat",
     min_date: str = "2026-01-01",
     parallel: int = 1,
+    extractor: str = "legacy",
+    force: bool = False,
 ) -> None:
     unique_posts, _ = load_posts(jsonl_paths)
 
@@ -75,17 +77,48 @@ def process_indexer(
     migrate_neo4j_for_dual_model(neo4j_driver)
 
     collection_name = collection_for_model(model)
-    indexed_urls = get_indexed_post_urls(qdrant_client, collection_name)
+    if force and extractor == "transformer":
+        # Resume поверх --force: пропускаем посты, чей :Post уже в v2-ветке.
+        from backend.indexer.graph_schema_v2 import SOURCE_MODEL_V2
+        from backend.indexer.neo4j_writer_v2 import get_indexed_post_urls_v2
 
-    to_process = [p for p in filtered if p.get("post_url") not in indexed_urls]
-    logger.info(
-        "Skipping %d already indexed posts, processing %d new posts (model=%s)",
-        len(filtered) - len(to_process),
-        len(to_process),
-        model,
-    )
+        graph_urls = get_indexed_post_urls_v2(neo4j_driver, SOURCE_MODEL_V2)
+        to_process = [p for p in filtered if p.get("post_url") not in graph_urls]
+        logger.info(
+            "Force+transformer: %d posts already in graph branch '%s', "
+            "processing %d remaining (model=%s)",
+            len(filtered) - len(to_process),
+            SOURCE_MODEL_V2,
+            len(to_process),
+            model,
+        )
+    elif force:
+        to_process = list(filtered)
+        logger.info(
+            "Force mode: processing all %d filtered posts (model=%s, extractor=%s)",
+            len(to_process),
+            model,
+            extractor,
+        )
+    else:
+        indexed_urls = get_indexed_post_urls(qdrant_client, collection_name)
 
-    extractor = build_extractor(model, openai_client)
+        to_process = [p for p in filtered if p.get("post_url") not in indexed_urls]
+        logger.info(
+            "Skipping %d already indexed posts, processing %d new posts (model=%s)",
+            len(filtered) - len(to_process),
+            len(to_process),
+            model,
+        )
+
+    extractor_obj = build_extractor(model, openai_client)
+    transformer = None
+    if extractor == "transformer":
+        from backend.indexer.graph_schema_v2 import SOURCE_MODEL_V2
+        from backend.indexer.graph_transformer import build_llm, build_transformer
+
+        transformer = build_transformer(build_llm(model))
+        logger.info("Using LLMGraphTransformer (model=%s)", model)
     total = 0
     errors = 0
 
@@ -102,9 +135,31 @@ def process_indexer(
         )
         vector = embedding_response.data[0].embedding
 
-        graph_result = extract_graph_from_post(post, extractor)
+        if transformer is not None:
+            from backend.indexer.graph_transformer import (
+                extract_from_documents,
+                posts_to_documents,
+            )
+            from backend.indexer.neo4j_writer_v2 import sanitize_graph, save_graph_v2
 
-        save_to_neo4j(neo4j_driver, graph_result, source_model=model)
+            docs = posts_to_documents([post])
+            if not docs:
+                return 0
+            for meta, nodes, rels in extract_from_documents(transformer, docs):
+                clean_nodes, clean_rels = sanitize_graph(nodes, rels)
+                save_graph_v2(
+                    neo4j_driver,
+                    clean_nodes,
+                    clean_rels,
+                    source_model=SOURCE_MODEL_V2,
+                    post_url=meta.get("post_url") or post.get("post_url"),
+                    post_date=meta.get("published_at") or post.get("published_at"),
+                    group_name=meta.get("group_name") or post.get("group_name"),
+                )
+        else:
+            graph_result = extract_graph_from_post(post, extractor_obj)
+
+            save_to_neo4j(neo4j_driver, graph_result, source_model=model)
 
         save_to_qdrant(qdrant_client, post, vector, collection_name)
 
@@ -158,12 +213,26 @@ def main() -> None:
         default=1,
         help="Number of parallel workers (use with --model gemma)",
     )
+    parser.add_argument(
+        "--extractor",
+        choices=["legacy", "transformer"],
+        default="legacy",
+        help="Graph extraction engine: legacy JSON prompt or LLMGraphTransformer (v2)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Reprocess all filtered posts even if already in Qdrant "
+        "(Qdrant upsert is idempotent; needed for graph reindex pilots)",
+    )
     args = parser.parse_args()
     process_indexer(
         args.paths,
         model=args.model,
         min_date=args.min_date,
         parallel=args.parallel,
+        extractor=args.extractor,
+        force=args.force,
     )
 
 

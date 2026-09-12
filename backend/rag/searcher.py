@@ -9,6 +9,31 @@ from backend.utils.logger import setup_logger
 
 logger = setup_logger("searcher")
 
+
+def _filter_posts_by_period(
+    posts: list[dict], start: str | None, end: str | None
+) -> list[dict]:
+    """Оставить посты внутри [start, end] (ISO). Карточки group:// — всегда."""
+    if not start and not end:
+        return posts
+    kept = []
+    for p in posts:
+        url = p.get("post_url") or ""
+        if url.startswith("group://"):
+            kept.append(p)
+            continue
+        pub = (p.get("published_at") or "")[:10]
+        if not pub:
+            kept.append(p)
+            continue
+        if start and pub < start[:10]:
+            continue
+        if end and pub > end[:10]:
+            continue
+        kept.append(p)
+    return kept
+
+
 COMMUNITIES_PATH = (
     Path(__file__).resolve().parent.parent.parent / "storage" / "communities.json"
 )
@@ -111,6 +136,12 @@ class GraphRAGSearcher:
                     posts = self._get_vec().search(question, top_k=5)
                 except Exception as e:
                     logger.warning("Vector search failed: %s", e)
+                # если в плане есть период — отсекаем посты вне периода
+                # (иначе в контекст лезут старые посты и тянут ответ назад)
+                if plan and (plan.get("period_start") or plan.get("period_end")):
+                    posts = _filter_posts_by_period(
+                        posts, plan.get("period_start"), plan.get("period_end")
+                    )
                 # для списка отрядов подмешиваем карточку группы с полным составом
                 if plan and plan.get("intent") == "units":
                     try:
@@ -138,7 +169,24 @@ class GraphRAGSearcher:
             communities=communities,
         )
 
-        # источники: URL постов
+        # источники: сначала URL из фактов графа (релевантны периоду),
+        # затем из векторных постов
+        if mode == "struct":
+            for f in graph_facts:
+                urls: list[str] = []
+                if f.get("source_post_url"):
+                    urls.append(f["source_post_url"])
+                for link in f.get("links") or []:
+                    u = link.get("source_post_url")
+                    if u and u not in urls:
+                        urls.append(u)
+                for s in f.get("sources") or []:
+                    if s and s not in urls:
+                        urls.append(s)
+                for url in urls[:3]:
+                    src = {"title": f.get("event") or f.get("person") or url, "url": url}
+                    if src not in sources:
+                        sources.append(src)
         for p in posts[:8]:
             url = p.get("post_url")
             title = p.get("group_name") or url
