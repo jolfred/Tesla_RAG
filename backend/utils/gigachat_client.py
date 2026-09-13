@@ -119,6 +119,7 @@ class GigaChatClient:
         return [m.model_dump() for m in data.data]
 
     def chat(self, messages: list[dict], **kwargs) -> str:
+        logger.info("LLM messages: %s", json.dumps(messages, ensure_ascii=False, indent=2))
         client = self._get_client()
         model = kwargs.pop("model", None) or self._model
         response = client.chat.completions.create(
