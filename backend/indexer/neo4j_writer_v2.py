@@ -1,30 +1,46 @@
-"""Запись графа v2 в Neo4j: настоящие метки, батчи, provenance из кода.
+"""Запись графа v2/v3 в Neo4j: настоящие метки, батчи, provenance из кода.
 
-Отличия от legacy neo4j_writer.py:
-- Узлы получают настоящую метку (:Person, :Squad, ...) + :Entity для совместимости.
-  Тип больше не лежит только в свойстве n.type.
-- Рёбра — настоящими типами [:MEMBER_OF], а не [:RELATES {type: ...}].
-- Batch-запись через UNWIND (один round-trip на пост, а не N).
-- source_post_url/date дописываются из метаданных поста детерминированно
-  (legacy просил их у LLM -> 72% null).
-- MERGE узлов по нормализованному norm_id (см. normalize.py).
-- :Post-узел + (:Post)-[:DESCRIBES]-> для обратного индекса по посту.
+Отличия v3 (Milestone B) от v2:
+- Рёбра проходят validate_triple() целиком (пункт 7), а не проверку имени типа.
+- Персоны резолвятся бинарно через canon.resolve_person (пункт 2):
+  merge в точное совпадение либо новый узел + POSSIBLE_DUPLICATE.
+  Узлы Person несут свойство person_key (blocking-ключ для lookup).
+- Рёбра ролей несут observed_at (всегда = дата поста, ставит код) и
+  event_date (= дата поста ТОЛЬКО при лемма-маркере выборов в строке
+  с ФИО, иначе null) + role_status (пункт 6).
+- Всё записанное новым пайплайном штампуется prompt_version (Milestone A).
+
+Контракт sanitize_graph НЕ менялся (nodes {norm_id,name,type},
+rels {src,tgt,relation,...}) — старые тесты зелёные.
 """
 
 from neo4j import GraphDatabase
 
-from backend.indexer.graph_schema_v2 import (
+from backend.common.canon import (
+    normalize_id,
+    person_key,
+    resolve_person,
+)
+from backend.common.ontology import (
     ALLOWED_NODES,
-    ALLOWED_REL_TYPES,
-    STOP_NODES,
+    PROMPT_VERSION,
+    validate_triple,
+)
+from backend.indexer.election_markers import (
+    compute_event_date,
+    is_role_relation,
 )
 from backend.indexer.logger import setup_indexer_logger
-from backend.indexer.normalize import merge_key, normalize_id
 
 logger = setup_indexer_logger()
 
 _ALLOWED_NODE_SET = set(ALLOWED_NODES)
-_ALLOWED_REL_SET = set(ALLOWED_REL_TYPES)
+
+
+def _endpoint_norm(raw: str) -> str | None:
+    """norm_id эндпоинта. Фолбэк на person_key (Б5) — в теле sanitize."""
+    norm = normalize_id((raw or "").strip())
+    return norm or None
 
 
 def sanitize_graph(
@@ -33,22 +49,35 @@ def sanitize_graph(
     """Пост-фильтр после LLM: strict-онтология, стоп-лист, синонимы.
 
     Узлы хранят только {norm_id, name, type} — описаний у узлов нет
-    (вся фактура на рёбрах). Дубли схлопываются по norm_id.
+    (вся фактура на рёбрах). Персоны группируются внутри поста по person_key
+    (разные написания одного ФИО — один узел). Дубли схлопываются.
     nodes: [{id, type, ...}], rels: [{source_id, target_id, relation, ...}]
     Возвращает очищенные списки. Узлы без рёбер (орфаны) дропаются.
     """
+    from backend.common.ontology import STOP_NODES
+
     kept_nodes: dict[str, dict] = {}
+    person_idx: dict[tuple, str] = {}
     for n in nodes:
         raw_id = (n.get("id") or "").strip()
         ntype = (n.get("type") or "").strip()
         if not raw_id or ntype not in _ALLOWED_NODE_SET:
+            continue
+        if ntype == "Person":
+            pkey = person_key(raw_id)
+            if pkey in person_idx:
+                continue  # то же ФИО другим написанием — уже есть
+            norm = normalize_id(raw_id)
+            if not norm or norm in STOP_NODES:
+                continue
+            person_idx[pkey] = norm
+            kept_nodes[norm] = {"norm_id": norm, "name": raw_id, "type": ntype}
             continue
         norm = normalize_id(raw_id)
         if not norm or norm in STOP_NODES:
             logger.debug("Dropping stop/garbage node %r (%s)", raw_id, ntype)
             continue
         if norm in kept_nodes:
-            # Дубли: первое имя побеждает, тип дополняем при конфликте позже (мультиметка).
             if kept_nodes[norm]["type"] != ntype:
                 logger.debug(
                     "Type conflict for %r: %s vs %s",
@@ -63,14 +92,33 @@ def sanitize_graph(
     linked: set[str] = set()
     for r in rels:
         rel = (r.get("relation") or r.get("type") or "").strip()
-        s = normalize_id((r.get("source_id") or "").strip())
-        t = normalize_id((r.get("target_id") or "").strip())
-        if not rel or rel not in _ALLOWED_REL_SET:
-            continue
-        if s not in kept_nodes or t not in kept_nodes:
+        s = _endpoint_norm(r.get("source_id") or "")
+        t = _endpoint_norm(r.get("target_id") or "")
+        if s is None or t is None:
+            continue  # пустой эндпоинт
+        # Фолбэк на person_key (Б5): "Артём Хазиев" в ребре при узле "Хазиев Артем".
+        if s not in kept_nodes:
+            s = person_idx.get(person_key(r.get("source_id") or ""))
+        if t not in kept_nodes:
+            t = person_idx.get(person_key(r.get("target_id") or ""))
+        if not s or not t:
             continue  # висячее ребро
+        if s not in kept_nodes or t not in kept_nodes:
+            continue
         if s == t:
             continue  # петля на себя
+        # Hard gate всей тройкой (пункт 7): Person-COMMANDED->Role не проходит,
+        # хотя имя типа связи "разрешено".
+        if not validate_triple(
+            kept_nodes[s]["type"], rel, kept_nodes[t]["type"]
+        ):
+            logger.debug(
+                "Dropping triple %s-%s->%s",
+                kept_nodes[s]["type"],
+                rel,
+                kept_nodes[t]["type"],
+            )
+            continue
         kept_rels.append(
             {
                 "src": s,
@@ -110,43 +158,104 @@ def save_graph_v2(
     post_url: str | None = None,
     post_date: str | None = None,
     group_name: str | None = None,
+    post_text: str | None = None,
 ) -> tuple[int, int]:
-    """Batch-запись одного поста. Возвращает (n_nodes, n_rels)."""
+    """Batch-запись одного поста. Возвращает (n_nodes, n_rels).
+
+    post_text нужен для детерминированного event_date (пункт 6):
+    без текста все ролевые факты получают event_date=null.
+    """
     if not nodes:
         return 0, 0
 
-    node_rows = []
-    for n in nodes:
-        node_rows.append(
-            {
-                "merge_key": merge_key(source_model, n["norm_id"]),
-                "norm_id": n["norm_id"],
-                "name": n["name"],
-                "label": n["type"],
-                "source_model": source_model,
-            }
-        )
-
-    rel_rows = []
-    for r in rels:
-        rel_rows.append(
-            {
-                "src_key": merge_key(source_model, r["src"]),
-                "tgt_key": merge_key(source_model, r["tgt"]),
-                "relation": r["relation"],
-                "source_model": source_model,
-                "source_post_url": post_url,
-                "date": post_date,
-                "role_title": r.get("role_title"),
-                "status": r.get("status") or "active",
-                "description": r.get("description"),
-            }
-        )
-
     with driver.session() as session:
+        # Орг-контекст поста для верификации персон: группа + Squad/Org из поста.
+        post_orgs = {normalize_id(group_name or "")} - {""}
+        post_orgs |= {
+            n["norm_id"]
+            for n in nodes
+            if n.get("type") in ("Squad", "Organization")
+        }
+
+        # Бинарный резолв персон (пункт 2). Не-персоны — как раньше.
+        resolutions: dict[str, object] = {}
+        for n in nodes:
+            if n.get("type") == "Person":
+                resolutions[n["norm_id"]] = resolve_person(
+                    n["name"], post_orgs, session, source_model
+                )
+
+        node_rows = []
+        norm_to_key: dict[str, str] = {}
+        for n in nodes:
+            if n.get("type") == "Person":
+                res = resolutions[n["norm_id"]]
+                mkey = res.target_id or res.new_merge_key
+                # Рёбра ссылаются sanitize-нормой; резолв мог почистить имя
+                # (экс-префикс) — мэппим обе нормы на один merge_key.
+                norm_to_key[n["norm_id"]] = mkey
+                norm_to_key[normalize_id(res.name)] = mkey
+                node_rows.append(
+                    {
+                        "merge_key": mkey,
+                        "norm_id": normalize_id(res.name),
+                        "name": res.name,
+                        "label": "Person",
+                        "person_key": list(res.person_key),
+                        "source_model": source_model,
+                    }
+                )
+            else:
+                mkey = f"{source_model}::{n['norm_id']}"
+                norm_to_key[n["norm_id"]] = mkey
+                node_rows.append(
+                    {
+                        "merge_key": mkey,
+                        "norm_id": n["norm_id"],
+                        "name": n["name"],
+                        "label": n["type"],
+                        "person_key": None,
+                        "source_model": source_model,
+                    }
+                )
+
+        rel_rows = []
+        for r in rels:
+            src_key = norm_to_key.get(r["src"])
+            tgt_key = norm_to_key.get(r["tgt"])
+            if not src_key or not tgt_key:
+                continue
+            event_date = None
+            role_status = "unknown"
+            if is_role_relation(r["relation"], r.get("role_title")):
+                # Источник ролевого факта — персона (см. ALLOWED_TRIPLES).
+                src_res = resolutions.get(r["src"])
+                person_display = src_res.name if src_res else r["src"]
+                event_date = compute_event_date(
+                    post_text, person_display, post_date
+                )
+                if src_res and src_res.is_former:
+                    role_status = "former"
+                elif event_date:
+                    role_status = "current"
+            rel_rows.append(
+                {
+                    "src_key": src_key,
+                    "tgt_key": tgt_key,
+                    "relation": r["relation"],
+                    "source_model": source_model,
+                    "source_post_url": post_url,
+                    "observed_at": post_date,
+                    "event_date": event_date,
+                    "role_status": role_status,
+                    "role_title": r.get("role_title"),
+                    "status": r.get("status") or "active",
+                    "description": r.get("description"),
+                }
+            )
+
         # Узлы: MERGE по merge_key + настоящая метка.
-        # Метку параметризовать в Cypher нельзя -> один запрос на тип узла
-        # (типов <= 9, вместо N запросов в legacy).
+        # Метку параметризовать в Cypher нельзя -> один запрос на тип узла.
         by_label: dict[str, list[dict]] = {}
         for r in node_rows:
             by_label.setdefault(r["label"], []).append(r)
@@ -162,12 +271,15 @@ def save_graph_v2(
                     n.id = row.name,
                     n.name = row.name,
                     n.type = row.label,
-                    n.source_model = row.source_model
+                    n.source_model = row.source_model,
+                    n.person_key = coalesce(row.person_key, n.person_key),
+                    n.prompt_version = $pv
                 """,
                 rows=rows,
+                pv=PROMPT_VERSION,
             )
         # Рёбра настоящими типами: тип параметризовать нельзя -> один
-        # запрос на тип связи (типов ~14, постов тысячи: всё равно выигрыш).
+        # запрос на тип связи.
         by_type: dict[str, list[dict]] = {}
         for row in rel_rows:
             by_type.setdefault(row["relation"], []).append(row)
@@ -181,14 +293,41 @@ def save_graph_v2(
                 MERGE (a)-[r:{rel_type} {{source_model: row.source_model}}]->(b)
                 SET r.type = row.relation,
                     r.source_post_url = coalesce(row.source_post_url, r.source_post_url),
-                    r.date = coalesce(row.date, r.date),
+                    r.date = coalesce(row.observed_at, r.date),
+                    r.observed_at = row.observed_at,
+                    r.event_date = row.event_date,
+                    r.role_status = row.role_status,
                     r.role_title = coalesce(row.role_title, r.role_title),
                     r.status = coalesce(row.status, r.status),
-                    r.description = coalesce(row.description, r.description)
+                    r.description = coalesce(row.description, r.description),
+                    r.prompt_version = $pv
                 """,
                 rows=[{k: v for k, v in r.items() if k != "relation"} for r in rows],
+                pv=PROMPT_VERSION,
             )
             n_rels += (res.consume().counters.relationships_created or 0)
+        # POSSIBLE_DUPLICATE: "пометить уточнить" (пункт 2, без журнала).
+        dup_rows = []
+        for norm, res in resolutions.items():
+            if res.action == "create" and res.possible_duplicates:
+                for cand in res.possible_duplicates:
+                    dup_rows.append(
+                        {"new_key": res.new_merge_key, "cand_key": cand}
+                    )
+        if dup_rows:
+            session.run(
+                """
+                UNWIND $rows AS row
+                MATCH (a:Entity {merge_key: row.new_key}),
+                      (b:Entity {merge_key: row.cand_key})
+                MERGE (a)-[r:POSSIBLE_DUPLICATE]->(b)
+                SET r.reason = 'same person_key, no context proof',
+                    r.logged_at = datetime(),
+                    r.prompt_version = $pv
+                """,
+                rows=dup_rows,
+                pv=PROMPT_VERSION,
+            )
         # :Post-узел + обратный индекс.
         if post_url:
             session.run(
@@ -196,7 +335,8 @@ def save_graph_v2(
                 MERGE (p:Post {url: $url})
                 SET p.published_at = coalesce($date, p.published_at),
                     p.group_name = coalesce($group, p.group_name),
-                    p.source_model = $model
+                    p.source_model = $model,
+                    p.prompt_version = $pv
                 WITH p
                 UNWIND $keys AS k
                 MATCH (n:Entity {merge_key: k})
@@ -206,6 +346,7 @@ def save_graph_v2(
                 date=post_date,
                 group=group_name,
                 model=source_model,
+                pv=PROMPT_VERSION,
                 keys=[r["merge_key"] for r in node_rows],
             )
 

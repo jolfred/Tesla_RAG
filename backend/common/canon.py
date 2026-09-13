@@ -80,6 +80,21 @@ def merge_key(source_model: str, norm_id: str) -> str:
     return f"{source_model}::{norm_id}"
 
 
+def new_person_merge_key(
+    source_model: str, clean_norm_id: str, n_existing: int
+) -> str:
+    """Детерминированный merge_key нового узла персоны.
+
+    n_existing = число узлов с тем же person_key в ветке (кандидаты).
+    Первый носитель имени забирает базовый ключ, следующие — суффикс ##N.
+    Детерминирован при фиксированном порядке постов; реиндекс всегда идёт
+    с нуля ветки (см. Milestone E), поэтому суффиксы стабильны.
+    """
+    if n_existing <= 0:
+        return merge_key(source_model, clean_norm_id)
+    return f"{source_model}::{clean_norm_id}##{n_existing + 1}"
+
+
 def parse_ex_person(raw: str) -> tuple[str, str | None, bool]:
     """Разбор "экс-<роль> <ФИО>".
 
@@ -127,6 +142,9 @@ class PersonResolution:
     is_former: bool = False
     role_hint: str | None = None
     target_id: str | None = None  # merge_key существующего узла (action=merge)
+    # merge_key для нового узла (action=create). Первый носитель имени —
+    # базовый ключ, при неоднозначности — с суффиксом ##N.
+    new_merge_key: str | None = None
     # merge_key кандидатов для POSSIBLE_DUPLICATE (action=create, непустой
     # только при неоднозначности — "пометить уточнить").
     possible_duplicates: list[str] = field(default_factory=list)
@@ -170,6 +188,9 @@ def resolve_person(
             name=clean,
             is_former=is_former,
             role_hint=role_hint,
+            new_merge_key=new_person_merge_key(
+                source_model, normalize_id(clean), 0
+            ),
         )
 
     if len(candidates) == 1:
@@ -194,5 +215,8 @@ def resolve_person(
         name=clean,
         is_former=is_former,
         role_hint=role_hint,
+        new_merge_key=new_person_merge_key(
+            source_model, normalize_id(clean), len(candidates)
+        ),
         possible_duplicates=[c["id"] for c in candidates],
     )

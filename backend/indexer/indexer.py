@@ -77,6 +77,16 @@ def process_indexer(
     migrate_neo4j_for_dual_model(neo4j_driver)
 
     collection_name = collection_for_model(model)
+    # Эмбеддинги не пересчитываются: точка с post_url уже есть -> пропускаем
+    # и вызов ProxyAPI, и upsert (идемпотентность по uuid5(post_url)).
+    from backend.indexer.qdrant_writer import get_indexed_post_urls as _q_urls
+
+    qdrant_urls = _q_urls(qdrant_client, collection_name)
+    logger.info(
+        "Qdrant '%s' already holds %d posts; vectors for them will be skipped",
+        collection_name,
+        len(qdrant_urls),
+    )
     if force and extractor == "transformer":
         # Resume поверх --force: пропускаем посты, чей :Post уже в v2-ветке.
         from backend.indexer.graph_schema_v2 import SOURCE_MODEL_V2
@@ -129,11 +139,16 @@ def process_indexer(
             logger.warning("Post %s has no text content, skipping", post_id)
             return 0
 
-        embedding_response = openai_client.embeddings.create(
-            model="text-embedding-3-small",
-            input=build_embedding_text(post),
-        )
-        vector = embedding_response.data[0].embedding
+        need_vector = post.get("post_url") not in qdrant_urls
+        vector = None
+        if need_vector:
+            embedding_response = openai_client.embeddings.create(
+                model="text-embedding-3-small",
+                input=build_embedding_text(post),
+            )
+            vector = embedding_response.data[0].embedding
+        else:
+            logger.info("Post %s already in Qdrant, skipping embedding", post_id)
 
         if transformer is not None:
             from backend.indexer.graph_transformer import (
@@ -155,13 +170,15 @@ def process_indexer(
                     post_url=meta.get("post_url") or post.get("post_url"),
                     post_date=meta.get("published_at") or post.get("published_at"),
                     group_name=meta.get("group_name") or post.get("group_name"),
+                    post_text=text,
                 )
         else:
             graph_result = extract_graph_from_post(post, extractor_obj)
 
             save_to_neo4j(neo4j_driver, graph_result, source_model=model)
 
-        save_to_qdrant(qdrant_client, post, vector, collection_name)
+        if need_vector:
+            save_to_qdrant(qdrant_client, post, vector, collection_name)
 
         logger.info("Processed post %s successfully", post_id)
         return 1

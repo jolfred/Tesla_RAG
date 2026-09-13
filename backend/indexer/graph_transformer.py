@@ -38,7 +38,9 @@ STRICT RULES:
 5. A person squad (отряд: ССО, СПО, СОП, ОСД, ССервО...) is a Squad, NOT a generic Organization.
 6. Ranks/roles of people (командир, комиссар, боец) go to HOLDS_ROLE with role_title, not to generic MEMBER_OF.
 7. Keep entity names EXACTLY as in the post, with original spacing and quotes. NEVER concatenate words into CamelCase.
-8. Every relationship MUST be one of the allowed triples (head type, relation, tail type), e.g. Person-MEMBER_OF->Squad, Squad-PART_OF->Organization, Person-WON_AWARD->Award.
+8. Every relationship MUST be one of the allowed triples (head type, relation, tail type), e.g. Person-MEMBER_OF->Squad, Squad-PART_OF->Organization, Person-WON_AWARD->Award, Squad-WON_AWARD->Award (a squad as a whole can win an award).
+9. Squad is ONLY for student labor squads (отряды: ССО, СПО, СОП, ОСД, ССервО, СМО, ШСО...). Corporate/partner teams, banks, companies (e.g. ЭкоБарсы, Ак Барс Банк) are Organization, NEVER Squad — even if the post calls them "команда".
+10. Schools, camps, shifts and gatherings (Школа кандидатов и бойцов/ШКБ, «Погружение», школы актива, смены, слёты, лагеря) are Event, NOT Organization — even when they have a name and a VK group. E.g. 'VI Школа кандидатов и бойцов «Погружение»' -> Event.
 
 Allowed node labels: Person, Squad, Organization, Event, Project, Award, Location, Role, Profession.
 Allowed relationships: HOLDS_ROLE, MEMBER_OF, COMMANDED, WON_AWARD, PARTICIPATED_IN, PART_OF, ORGANIZED, HELD_AT, LOCATED_IN, TRAINED_IN, SUPPORTED_BY.
