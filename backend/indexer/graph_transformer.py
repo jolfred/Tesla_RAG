@@ -41,6 +41,7 @@ STRICT RULES:
 8. Every relationship MUST be one of the allowed triples (head type, relation, tail type), e.g. Person-MEMBER_OF->Squad, Squad-PART_OF->Organization, Person-WON_AWARD->Award, Squad-WON_AWARD->Award (a squad as a whole can win an award).
 9. Squad is ONLY for student labor squads (отряды: ССО, СПО, СОП, ОСД, ССервО, СМО, ШСО...). Corporate/partner teams, banks, companies (e.g. ЭкоБарсы, Ак Барс Банк) are Organization, NEVER Squad — even if the post calls them "команда".
 10. Schools, camps, shifts and gatherings (Школа кандидатов и бойцов/ШКБ, «Погружение», школы актива, смены, слёты, лагеря) are Event, NOT Organization — even when they have a name and a VK group. E.g. 'VI Школа кандидатов и бойцов «Погружение»' -> Event.
+11. RECALL: every Person mentioned with a role, title or squad membership MUST have at least one HOLDS_ROLE/COMMANDED/MEMBER_OF edge — a Person node without edges is dropped and the fact is lost. When a post says 'руководитель X', 'командир Y', 'встал на должность ... Z' or lists a command staff, emit the corresponding role edge even if the wording is indirect. Same for squads: a mentioned squad gets PART_OF/MEMBER_OF/ORGANIZED/PARTICIPATED_IN.
 
 Allowed node labels: Person, Squad, Organization, Event, Project, Award, Location, Role, Profession.
 Allowed relationships: HOLDS_ROLE, MEMBER_OF, COMMANDED, WON_AWARD, PARTICIPATED_IN, PART_OF, ORGANIZED, HELD_AT, LOCATED_IN, TRAINED_IN, SUPPORTED_BY.
