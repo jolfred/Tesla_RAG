@@ -16,12 +16,25 @@ def _limit(plan: dict) -> int:
 
 
 def _org_cond(alias: str = "o") -> str:
-    """Условие по организации: точный norm_id при разрешённом org_exact
-    (пункт 2/C4 — вместо молчаливого CONTAINS-склеивания), иначе legacy-CONTAINS."""
+    """Условие по организации (C4, union-форма).
+
+    Точное совпадение norm_id — первым, CONTAINS — следом. Строгая ветвь
+    БЕЗ фолбэка давала тишину, когда org_exact указывал не на тот узел
+    (кейс D: org_exact='тесла' = Squad СПрО, а не штаб → 0 фактов при живых
+    сидовых данных). Union не молчит никогда.
+    """
     return (
-        f"($org_exact IS NOT NULL AND {alias}.norm_id = $org_exact "
-        f"OR $org_exact IS NULL AND ($org IS NULL "
-        f"OR toLower(toString({alias}.name)) CONTAINS toLower($org)))"
+        f"($org IS NULL OR "
+        f"($org_exact IS NOT NULL AND {alias}.norm_id = $org_exact) "
+        f"OR toLower(toString({alias}.name)) CONTAINS toLower($org))"
+    )
+
+
+def _exact_first(alias: str = "o") -> str:
+    """Точные совпадения первыми (защита от усечения LIMIT'ом)."""
+    return (
+        f"CASE WHEN $org_exact IS NOT NULL AND {alias}.norm_id = $org_exact "
+        f"THEN 0 ELSE 1 END"
     )
 
 
@@ -53,8 +66,10 @@ def units_query(plan: dict) -> Optional[tuple[str, dict]]:
         WHERE h.source_model = $model
           AND (""" + _org_cond("h") + """)
         RETURN DISTINCT u.name AS unit,
-                collect(DISTINCT r.source_post_url) AS sources
-        ORDER BY u.name
+                collect(DISTINCT r.source_post_url) AS sources,
+                max(CASE WHEN $org_exact IS NOT NULL AND h.norm_id = $org_exact
+                         THEN 0 ELSE 1 END) AS exact_rank
+        ORDER BY exact_rank, u.name
         LIMIT $limit
         """,
         _params(plan),
@@ -93,7 +108,7 @@ def commanders_query(plan: dict) -> Optional[tuple[str, dict]]:
                 r.date AS date, """ + _V3_PROPS + """,
                 r.description AS description,
                 r.source_post_url AS source_post_url
-        ORDER BY p.name
+        ORDER BY """ + _exact_first("o") + """, p.name
         LIMIT $limit
         """,
         _params(plan),
@@ -110,6 +125,7 @@ def members_query(plan: dict) -> Optional[tuple[str, dict]]:
         RETURN p.name AS person, o.name AS org, r.date AS date,
                 """ + _V3_PROPS + """,
                 r.description AS description, r.source_post_url AS source_post_url
+        ORDER BY """ + _exact_first("o") + """, p.name
         LIMIT $limit
         """,
         _params(plan),
@@ -122,10 +138,11 @@ def winners_query(plan: dict) -> Optional[tuple[str, dict]]:
     return (
         """
         MATCH (p:Person {source_model:$model})-[r:WON_AWARD]->(a)
-        WHERE ($org_exact IS NOT NULL AND (p.norm_id = $org_exact OR a.norm_id = $org_exact)
-               OR $org_exact IS NULL AND ($org IS NULL
-                   OR toLower(toString(p.name)) CONTAINS toLower($org)
-                   OR toLower(toString(a.name)) CONTAINS toLower($org)))
+        WHERE ($org IS NULL
+               OR ($org_exact IS NOT NULL
+                   AND (p.norm_id = $org_exact OR a.norm_id = $org_exact))
+               OR toLower(toString(p.name)) CONTAINS toLower($org)
+               OR toLower(toString(a.name)) CONTAINS toLower($org))
         RETURN p.name AS person, a.name AS award, r.date AS date,
                 """ + _V3_PROPS + """,
                 r.description AS description, r.source_post_url AS source_post_url
@@ -160,10 +177,13 @@ def partners_query(plan: dict) -> Optional[tuple[str, dict]]:
         MATCH (s:Entity {source_model:$model})-[r:SUPPORTED_BY]-(o:Organization)
         WHERE (s:Squad OR s:Organization) AND o.source_model = $model
           AND (""" + _org_cond("s") + """)
-        RETURN DISTINCT s.name AS subject, o.name AS partner,
+        RETURN DISTINCT s.name AS subject, s.norm_id AS subject_norm,
+                o.name AS partner,
                 r.date AS date, """ + _V3_PROPS + """,
                 r.description AS description,
                 r.source_post_url AS source_post_url
+        ORDER BY CASE WHEN $org_exact IS NOT NULL AND subject_norm = $org_exact
+                      THEN 0 ELSE 1 END, o.name
         LIMIT $limit
         """,
         _params(plan),

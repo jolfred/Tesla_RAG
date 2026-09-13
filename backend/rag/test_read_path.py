@@ -158,5 +158,11 @@ def test_org_exact_in_commanders_query():
         {"intent": "commanders", "org_filter": "Тесла",
          "org_exact": "штаб со кгэу тесла", "limit": 20}
     )
+    # Union-форма: точные первыми, CONTAINS-фолбэк не отрезан (кейс D).
     assert "o.norm_id = $org_exact" in q
+    assert "CONTAINS toLower($org)" in q
     assert params["org_exact"] == "штаб со кгэу тесла"
+
+
+def test_question_year_none_for_range():
+    assert question_year("с 2024 по 2026") is None
