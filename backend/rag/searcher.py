@@ -116,6 +116,19 @@ class GraphRAGSearcher:
                 self._communities = []
         return self._communities
 
+    @staticmethod
+    def _format_card(meta: dict) -> dict:
+        # Единый формат карточки — backend/indexer/group_meta.group_card_text
+        # (с контактами и связями, а не только описание).
+        from backend.indexer.group_meta import group_card_text
+
+        return {
+            "post_url": f"group://{meta.get('domain', '')}",
+            "published_at": "",
+            "group_name": meta.get("name", ""),
+            "text": group_card_text(meta),
+        }
+
     def _group_card_posts(self, org_filter: str | None) -> list[dict]:
         if not org_filter:
             return []
@@ -131,20 +144,37 @@ class GraphRAGSearcher:
                 name = meta.get("name", "")
                 if key not in name.lower():
                     continue
-                parts = [f"Группа: {name}"]
-                if meta.get("status"):
-                    parts.append(f"Статус: {meta['status']}")
-                if meta.get("members_count"):
-                    parts.append(f"Участников: {meta['members_count']}")
-                if meta.get("description"):
-                    parts.append(f"Описание: {meta['description']}")
-                posts.append({
-                    "post_url": f"group://{meta.get('domain', '')}",
-                    "published_at": "",
-                    "group_name": name,
-                    "text": "\n".join(parts),
-                })
+                posts.append(self._format_card(meta))
         return posts
+
+    def _cards_for_fact_sources(self, graph_facts: list[dict]) -> list[dict]:
+        """Карточки групп-источников фактов (seed-baseline, п.10).
+
+        Сидовые факты ссылаются на group://domain — без текста карточки
+        отвечающий видит голый триплет. Подмешиваем тексты карточек,
+        чтобы было на что опереться («по карточке X, но пост сообщает Y»).
+        """
+        domains: list[str] = []
+        for f in graph_facts or []:
+            urls = [f.get("source_post_url")]
+            for link in f.get("links") or []:
+                if isinstance(link, dict):
+                    urls.append(link.get("source_post_url"))
+            urls += list(f.get("sources") or [])
+            for u in urls:
+                if u and u.startswith("group://"):
+                    d = u[len("group://"):]
+                    if d and d not in domains:
+                        domains.append(d)
+        cards = []
+        for d in domains:
+            path = GROUPS_DIR / f"groups_{d}.json"
+            try:
+                with path.open(encoding="utf-8") as fh:
+                    cards.append(self._format_card(json.load(fh)))
+            except (OSError, json.JSONDecodeError):
+                continue
+        return cards
 
     def _resolve_source_posts(
         self, graph_facts: list[dict], cap: int = 8
@@ -233,34 +263,44 @@ class GraphRAGSearcher:
                 graph_facts.sort(key=_fact_date, reverse=True)
             except Exception:
                 pass
-            if mode == "struct":
-                if graph_facts:
-                    # Контекст — ИМЕННО посты-источники фактов (п.11, тест).
-                    source_posts = self._resolve_source_posts(graph_facts)
-                    if STRUCT_USE_VECTOR:
-                        try:
-                            posts = self._get_vec().search(question, top_k=5)
-                        except Exception as e:
-                            logger.warning("Vector search failed: %s", e)
-                else:
-                    # П.9: граф молчит — не сдаёмся, вектор отдельным блоком.
-                    # "Нет данных" разрешено, только если оба источника пусты.
+            if graph_facts:
+                # Контекст — ИМЕННО посты-источники фактов (п.11, тест).
+                # Работает и для local: у фактов entity_detail есть links с URL.
+                source_posts = self._resolve_source_posts(graph_facts)
+                if mode == "struct" and STRUCT_USE_VECTOR:
                     try:
                         posts = self._get_vec().search(question, top_k=5)
                     except Exception as e:
-                        logger.warning("Vector fallback failed: %s", e)
+                        logger.warning("Vector search failed: %s", e)
+                # Сидовые факты (group://) — подмешиваем тексты карточек (п.10).
+                # После вектора, с дедупом: карточка — baseline, а не дубль.
+                try:
+                    cards = self._cards_for_fact_sources(graph_facts)
+                    seen = {p.get("post_url") for p in posts}
+                    posts = [c for c in cards if c["post_url"] not in seen] + posts
+                except Exception as e:
+                    logger.warning("Group card resolve failed: %s", e)
+            else:
+                # П.9: граф молчит — не сдаёмся, вектор отдельным блоком.
+                # "Нет данных" разрешено, только если оба источника пусты.
+                try:
+                    posts = self._get_vec().search(question, top_k=5)
+                except Exception as e:
+                    logger.warning("Vector fallback failed: %s", e)
+            if mode == "struct":
                 # Период: из плана, иначе год из вопроса (п.8).
                 pstart = (plan or {}).get("period_start") or year_period[0]
                 pend = (plan or {}).get("period_end") or year_period[1]
                 if pstart or pend:
                     source_posts = _filter_posts_by_period(source_posts, pstart, pend)
                     posts = _filter_posts_by_period(posts, pstart, pend)
-                # для списка отрядов подмешиваем карточку группы с полным составом
+                # units: полный состав из карточки по имени (факты из постов
+                # могут не ссылаться на group:// — это дополнение к общему правилу).
                 if plan and plan.get("intent") == "units":
                     try:
                         cards = self._group_card_posts(plan.get("org_filter"))
-                        if cards:
-                            posts = cards + posts
+                        seen = {p.get("post_url") for p in posts}
+                        posts = [c for c in cards if c["post_url"] not in seen] + posts
                     except Exception as e:
                         logger.warning("Group card injection failed: %s", e)
 

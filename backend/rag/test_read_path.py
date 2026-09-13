@@ -177,3 +177,29 @@ def test_org_exact_in_commanders_query():
 
 def test_question_year_none_for_range():
     assert question_year("с 2024 по 2026") is None
+
+
+def test_cards_for_fact_sources():
+    import json
+    import tempfile
+    from pathlib import Path
+    from backend.rag import searcher as mod
+
+    with tempfile.TemporaryDirectory() as tmp:
+        prev, mod.GROUPS_DIR = mod.GROUPS_DIR, Path(tmp)
+        try:
+            (Path(tmp) / "groups_rso_tesla.json").write_text(
+                json.dumps({"domain": "rso_tesla", "name": "Тесла HQ",
+                            "description": "Контакты: Иван — командир"}),
+                encoding="utf-8",
+            )
+            s = mod.GraphRAGSearcher()
+            cards = s._cards_for_fact_sources(
+                [{"source_post_url": "group://rso_tesla"},
+                 {"links": [{"source_post_url": "https://vk.com/x"}]}]
+            )
+        finally:
+            mod.GROUPS_DIR = prev
+        assert len(cards) == 1
+        assert "Иван — командир" in cards[0]["text"]
+        assert cards[0]["post_url"] == "group://rso_tesla"
