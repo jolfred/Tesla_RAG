@@ -15,6 +15,35 @@ def _limit(plan: dict) -> int:
     return int(plan.get("limit") or 20)
 
 
+def _org_cond(alias: str = "o") -> str:
+    """Условие по организации: точный norm_id при разрешённом org_exact
+    (пункт 2/C4 — вместо молчаливого CONTAINS-склеивания), иначе legacy-CONTAINS."""
+    return (
+        f"($org_exact IS NOT NULL AND {alias}.norm_id = $org_exact "
+        f"OR $org_exact IS NULL AND ($org IS NULL "
+        f"OR toLower(toString({alias}.name)) CONTAINS toLower($org)))"
+    )
+
+
+def _params(plan: dict, **extra) -> dict:
+    p = {
+        "model": MODEL,
+        "org": plan.get("org_filter"),
+        "org_exact": plan.get("org_exact"),
+        "limit": _limit(plan),
+    }
+    p.update(extra)
+    return p
+
+
+# Новые свойства рёбер v3 (пункт 6): пробрасываем в факты, чтобы отвечающий
+# различал дату события и дату упоминания. У старых данных — null, это нормально.
+_V3_PROPS = "r.observed_at AS observed_at, r.event_date AS event_date, r.role_status AS role_status"
+_V3_LINKS = ("rel: type(r), date: r.date, observed_at: r.observed_at, "
+             "event_date: r.event_date, role_status: r.role_status, "
+             "source_post_url: r.source_post_url")
+
+
 def units_query(plan: dict) -> Optional[tuple[str, dict]]:
     if plan.get("intent") != "units":
         return None
@@ -22,13 +51,13 @@ def units_query(plan: dict) -> Optional[tuple[str, dict]]:
         """
         MATCH (u:Squad {source_model:$model})-[r:PART_OF]->(h)
         WHERE h.source_model = $model
-          AND ($org IS NULL OR toLower(toString(h.name)) CONTAINS toLower($org))
+          AND (""" + _org_cond("h") + """)
         RETURN DISTINCT u.name AS unit,
-               collect(DISTINCT r.source_post_url) AS sources
+                collect(DISTINCT r.source_post_url) AS sources
         ORDER BY u.name
         LIMIT $limit
         """,
-        {"model": MODEL, "org": plan.get("org_filter"), "limit": _limit(plan)},
+        _params(plan),
     )
 
 
@@ -38,21 +67,18 @@ def events_in_period_query(plan: dict) -> Optional[tuple[str, dict]]:
     return (
         """
         MATCH (e:Event {source_model:$model})-[r]-(o)
-        WHERE ($org IS NULL OR toLower(toString(o.name)) CONTAINS toLower($org))
+        WHERE (""" + _org_cond("o") + """)
           AND ($pstart IS NULL OR coalesce(r.date,'9999') >= $pstart)
           AND ($pend IS NULL OR coalesce(r.date,'0000') <= $pend)
         RETURN DISTINCT e.name AS event,
-               collect(DISTINCT {rel: type(r), date: r.date,
-                                  source_post_url: r.source_post_url}) AS links
+                collect(DISTINCT {""" + _V3_LINKS + """, target: o.name}) AS links
         LIMIT $limit
         """,
-        {
-            "model": MODEL,
-            "org": plan.get("org_filter"),
-            "pstart": plan.get("period_start"),
-            "pend": plan.get("period_end"),
-            "limit": _limit(plan),
-        },
+        _params(
+            plan,
+            pstart=plan.get("period_start"),
+            pend=plan.get("period_end"),
+        ),
     )
 
 
@@ -62,14 +88,15 @@ def commanders_query(plan: dict) -> Optional[tuple[str, dict]]:
     return (
         """
         MATCH (p:Person {source_model:$model})-[r:COMMANDED|HOLDS_ROLE]->(o)
-        WHERE ($org IS NULL OR toLower(toString(o.name)) CONTAINS toLower($org))
+        WHERE (""" + _org_cond("o") + """)
         RETURN p.name AS person, r.role_title AS role_title, r.status AS status,
-               r.date AS date, r.description AS description,
-               r.source_post_url AS source_post_url
+                r.date AS date, """ + _V3_PROPS + """,
+                r.description AS description,
+                r.source_post_url AS source_post_url
         ORDER BY p.name
         LIMIT $limit
         """,
-        {"model": MODEL, "org": plan.get("org_filter"), "limit": _limit(plan)},
+        _params(plan),
     )
 
 
@@ -79,12 +106,13 @@ def members_query(plan: dict) -> Optional[tuple[str, dict]]:
     return (
         """
         MATCH (p:Person {source_model:$model})-[r:MEMBER_OF]->(o)
-        WHERE ($org IS NULL OR toLower(toString(o.name)) CONTAINS toLower($org))
+        WHERE (""" + _org_cond("o") + """)
         RETURN p.name AS person, o.name AS org, r.date AS date,
-               r.description AS description, r.source_post_url AS source_post_url
+                """ + _V3_PROPS + """,
+                r.description AS description, r.source_post_url AS source_post_url
         LIMIT $limit
         """,
-        {"model": MODEL, "org": plan.get("org_filter"), "limit": _limit(plan)},
+        _params(plan),
     )
 
 
@@ -94,13 +122,16 @@ def winners_query(plan: dict) -> Optional[tuple[str, dict]]:
     return (
         """
         MATCH (p:Person {source_model:$model})-[r:WON_AWARD]->(a)
-        WHERE ($org IS NULL OR toLower(toString(p.name)) CONTAINS toLower($org)
-               OR toLower(toString(a.name)) CONTAINS toLower($org))
+        WHERE ($org_exact IS NOT NULL AND (p.norm_id = $org_exact OR a.norm_id = $org_exact)
+               OR $org_exact IS NULL AND ($org IS NULL
+                   OR toLower(toString(p.name)) CONTAINS toLower($org)
+                   OR toLower(toString(a.name)) CONTAINS toLower($org)))
         RETURN p.name AS person, a.name AS award, r.date AS date,
-               r.description AS description, r.source_post_url AS source_post_url
+                """ + _V3_PROPS + """,
+                r.description AS description, r.source_post_url AS source_post_url
         LIMIT $limit
         """,
-        {"model": MODEL, "org": plan.get("org_filter"), "limit": _limit(plan)},
+        _params(plan),
     )
 
 
@@ -110,15 +141,32 @@ def projects_query(plan: dict) -> Optional[tuple[str, dict]]:
     return (
         """
         MATCH (pr:Project {source_model:$model})
-        WHERE ($org IS NULL OR toLower(toString(pr.name)) CONTAINS toLower($org))
+        WHERE (""" + _org_cond("pr") + """)
         OPTIONAL MATCH (pr)-[r]-(o)
         RETURN pr.name AS project,
-               collect(DISTINCT {rel: type(r), target: o.name,
-                                  date: r.date,
-                                  source_post_url: r.source_post_url}) AS links
+                collect(DISTINCT {""" + _V3_LINKS + """, target: o.name}) AS links
         LIMIT $limit
         """,
-        {"model": MODEL, "org": plan.get("org_filter"), "limit": _limit(plan)},
+        _params(plan),
+    )
+
+
+def partners_query(plan: dict) -> Optional[tuple[str, dict]]:
+    """Б4: партнёры штаба/отряда (Squad|Organization)-[:SUPPORTED_BY]-(Organization)."""
+    if plan.get("intent") != "partners":
+        return None
+    return (
+        """
+        MATCH (s:Entity {source_model:$model})-[r:SUPPORTED_BY]-(o:Organization)
+        WHERE (s:Squad OR s:Organization) AND o.source_model = $model
+          AND (""" + _org_cond("s") + """)
+        RETURN DISTINCT s.name AS subject, o.name AS partner,
+                r.date AS date, """ + _V3_PROPS + """,
+                r.description AS description,
+                r.source_post_url AS source_post_url
+        LIMIT $limit
+        """,
+        _params(plan),
     )
 
 
@@ -144,9 +192,7 @@ def entity_detail_query(plan: dict) -> Optional[tuple[str, dict]]:
         WHERE toLower(toString(n.name)) CONTAINS toLower($name)
         OPTIONAL MATCH (n)-[r]-(m)
         RETURN n.name AS id, n.type AS type,
-               collect(DISTINCT {rel: type(r), target: m.name,
-                                  date: r.date,
-                                  source_post_url: r.source_post_url}) AS links
+                collect(DISTINCT {""" + _V3_LINKS + """, target: m.name}) AS links
         """,
         {"model": MODEL, "name": plan["target_name"]},
     )
@@ -165,8 +211,7 @@ def _generic_queries(plan: dict) -> list[tuple[str, dict]]:
             WHERE toLower(toString(n.name)) CONTAINS toLower($name)
             OPTIONAL MATCH (n)-[r]-(m)
             RETURN n.name AS id, n.type AS type,
-                   collect(DISTINCT {rel: type(r), target: m.name,
-                                      date: r.date}) AS links
+                    collect(DISTINCT {""" + _V3_LINKS + """, target: m.name}) AS links
             LIMIT $limit
             """,
             {"model": MODEL, "etype": etype, "name": tname, "limit": limit},
@@ -187,8 +232,7 @@ def _generic_queries(plan: dict) -> list[tuple[str, dict]]:
             WHERE toLower(toString(n.name)) CONTAINS toLower($name)
             OPTIONAL MATCH (n)-[r]-(m)
             RETURN n.name AS id, n.type AS type,
-                   collect(DISTINCT {rel: type(r), target: m.name,
-                                      date: r.date}) AS links
+                    collect(DISTINCT {""" + _V3_LINKS + """, target: m.name}) AS links
             LIMIT $limit
             """,
             {"model": MODEL, "name": tname, "limit": limit},
@@ -202,6 +246,7 @@ _INTENT_HANDLERS = [
     commanders_query,
     members_query,
     winners_query,
+    partners_query,
     projects_query,
     locations_query,
     entity_detail_query,

@@ -49,6 +49,34 @@ class GraphPlanner:
             data.setdefault(k, v)
         return data
 
+    def resolve_org_exact(self, org_filter: str | None) -> str | None:
+        """Точная резолюция организации через canon (C4).
+
+        Возвращает norm_id существующего узла или None (тогда запросы
+        используют legacy CONTAINS-фолбэк). Никакого молчаливого склеивания.
+        """
+        if not org_filter:
+            return None
+        from backend.common.canon import normalize_id
+        from backend.rag.planner_queries import MODEL
+
+        norm = normalize_id(org_filter)
+        if not norm:
+            return None
+        graph = self._get_graph()
+        if graph is None:
+            return None
+        try:
+            rows = graph.search_cypher(
+                "MATCH (o:Entity {source_model:$m}) WHERE o.norm_id = $n "
+                "RETURN o.norm_id AS n LIMIT 1",
+                {"m": MODEL, "n": norm},
+            )
+        except Exception as e:
+            logger.warning("org resolve failed: %s", e)
+            return None
+        return rows[0]["n"] if rows else None
+
     def execute(self, plan: dict) -> list[dict]:
         graph = self._get_graph()
         if graph is None:

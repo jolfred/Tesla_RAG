@@ -6,7 +6,7 @@ PLANNER_PROMPT = """Ты — планировщик запросов к граф
 
 Ответь строго JSON:
 {
-  "intent": "units | events_in_period | commanders | members | winners | projects | locations | entity_detail | general",
+  "intent": "units | events_in_period | commanders | members | winners | projects | locations | partners | entity_detail | general",
   "entity_type": null,
   "target_name": null,
   "period_start": "YYYY-MM-DD | null",
@@ -24,6 +24,7 @@ PLANNER_PROMPT = """Ты — планировщик запросов к граф
 - "winners": вопрос о победителях/наградах.
 - "projects": вопрос о проектах/трудовых семестрах.
 - "locations": вопрос о местах/локациях.
+- "partners": вопрос о партнёрах/спонсорах/поддержке (напр. "кто партнёры", "с кем сотрудничает", "кто поддерживает"). org_filter задавайте по штабу/отряду.
 - "entity_detail": вопрос о конкретной сущности (target_name задан) и НЕ о командирах/контактах/составе.
 - "general": всё остальное — вернуть 0,0 в period если период не указан.
 - org_filter: "Тесла" если вопрос о штабе/отрядах Тесла, иначе null.

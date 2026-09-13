@@ -1,4 +1,6 @@
 import json
+import re
+import uuid
 from pathlib import Path
 
 from backend.embeddings.vec_search import VectorSearcher
@@ -8,6 +10,39 @@ from backend.rag.query_router import QueryRouter
 from backend.utils.logger import setup_logger
 
 logger = setup_logger("searcher")
+
+# ТЕСТ п.11: struct без вектора — контекст только из постов-источников фактов.
+# Откат: True. Тогда struct снова подмешивает векторный top-5.
+STRUCT_USE_VECTOR = False
+
+_YEAR_RE = re.compile(r"(?:19|20)\d{2}")
+
+
+def question_year(question: str) -> str | None:
+    """Единственный год из вопроса (п.8) — для фильтра на всех путях."""
+    years = sorted(set(_YEAR_RE.findall(question or "")))
+    return years[0] if len(years) == 1 else None
+
+
+def _fact_date(f: dict) -> str:
+    """Дата факта для сортировки (п.10): сначала event_date, при отсутствии —
+    observed_at/date. Свежее важнее, но дата события бьёт дату упоминания."""
+    events, mentions = [], []
+
+    def _add(d, bucket):
+        if d:
+            bucket.append((d or "")[:10])
+
+    _add(f.get("event_date"), events)
+    _add(f.get("observed_at"), mentions)
+    _add(f.get("date"), mentions)
+    for link in f.get("links") or []:
+        if isinstance(link, dict):
+            _add(link.get("event_date"), events)
+            _add(link.get("observed_at"), mentions)
+            _add(link.get("date"), mentions)
+    pool = events or mentions
+    return max(pool) if pool else ""
 
 
 def _filter_posts_by_period(
@@ -111,6 +146,60 @@ class GraphRAGSearcher:
                 })
         return posts
 
+    def _resolve_source_posts(
+        self, graph_facts: list[dict], cap: int = 8
+    ) -> list[dict]:
+        """Полные тексты постов-источников фактов (п.11, главная проблема).
+
+        URL берём из фактов (source_post_url + links), тексты — точечным
+        Qdrant retrieve по uuid5(post_url). Без эмбеддингов, без поиска:
+        в контекст идут ИМЕННО те посты, на которых стоят факты.
+        """
+        urls: list[str] = []
+        for f in graph_facts or []:
+            cands = [f.get("source_post_url")]
+            for link in f.get("links") or []:
+                if isinstance(link, dict):
+                    cands.append(link.get("source_post_url"))
+            for s in f.get("sources") or []:
+                cands.append(s)
+            for u in cands:
+                if u and u not in urls and not u.startswith("group://"):
+                    urls.append(u)
+        urls = urls[:cap]
+        if not urls:
+            return []
+        try:
+            qclient = self._get_vec()._get_qdrant()
+            ids = [str(uuid.uuid5(uuid.NAMESPACE_URL, u)) for u in urls]
+            points = qclient.retrieve(
+                collection_name="posts",
+                ids=ids,
+                with_payload=True,
+                with_vectors=False,
+            )
+            by_id = {str(p.id): (p.payload or {}) for p in points}
+        except Exception as e:
+            logger.warning("Source-post resolve failed: %s", e)
+            return []
+        posts = []
+        for u, pid in zip(urls, ids):
+            pay = by_id.get(pid) or {}
+            text = pay.get("text_clean") or ""
+            if not text:
+                logger.warning("Source post %s has no text in Qdrant", u)
+                continue
+            posts.append(
+                {
+                    "post_url": u,
+                    "published_at": pay.get("published_at", ""),
+                    "group_name": pay.get("group_name", ""),
+                    "text": text,
+                }
+            )
+        logger.info("Resolved %d/%d source posts", len(posts), len(urls))
+        return posts
+
     def search(self, question: str, top_k: int = 8) -> dict:
         logger.info("GraphRAG search: '%s'", question)
 
@@ -119,29 +208,53 @@ class GraphRAGSearcher:
 
         graph_facts = []
         posts = []
+        source_posts = []
         communities = []
         sources = []
         media = []
+
+        # Год из вопроса — один раз, на все пути (п.8, только на время теста).
+        year = question_year(question)
+        year_period = (f"{year}-01-01", f"{year}-12-31") if year else (None, None)
 
         if mode in ("struct", "local"):
             plan = None
             try:
                 plan = self._get_planner().plan(question)
+                # Точная резолюция организации (C4) до выполнения запроса.
+                plan["org_exact"] = self._get_planner().resolve_org_exact(
+                    plan.get("org_filter")
+                )
                 graph_facts = self._get_planner().execute(plan)
             except Exception as e:
                 logger.warning("Planner execution failed: %s", e)
+            # Temporal-приоритет (п.10): свежие факты первыми.
+            try:
+                graph_facts.sort(key=_fact_date, reverse=True)
+            except Exception:
+                pass
             if mode == "struct":
-                # векторный контекст как дополнение к фактам
-                try:
-                    posts = self._get_vec().search(question, top_k=5)
-                except Exception as e:
-                    logger.warning("Vector search failed: %s", e)
-                # если в плане есть период — отсекаем посты вне периода
-                # (иначе в контекст лезут старые посты и тянут ответ назад)
-                if plan and (plan.get("period_start") or plan.get("period_end")):
-                    posts = _filter_posts_by_period(
-                        posts, plan.get("period_start"), plan.get("period_end")
-                    )
+                if graph_facts:
+                    # Контекст — ИМЕННО посты-источники фактов (п.11, тест).
+                    source_posts = self._resolve_source_posts(graph_facts)
+                    if STRUCT_USE_VECTOR:
+                        try:
+                            posts = self._get_vec().search(question, top_k=5)
+                        except Exception as e:
+                            logger.warning("Vector search failed: %s", e)
+                else:
+                    # П.9: граф молчит — не сдаёмся, вектор отдельным блоком.
+                    # "Нет данных" разрешено, только если оба источника пусты.
+                    try:
+                        posts = self._get_vec().search(question, top_k=5)
+                    except Exception as e:
+                        logger.warning("Vector fallback failed: %s", e)
+                # Период: из плана, иначе год из вопроса (п.8).
+                pstart = (plan or {}).get("period_start") or year_period[0]
+                pend = (plan or {}).get("period_end") or year_period[1]
+                if pstart or pend:
+                    source_posts = _filter_posts_by_period(source_posts, pstart, pend)
+                    posts = _filter_posts_by_period(posts, pstart, pend)
                 # для списка отрядов подмешиваем карточку группы с полным составом
                 if plan and plan.get("intent") == "units":
                     try:
@@ -160,12 +273,15 @@ class GraphRAGSearcher:
                 posts = self._get_vec().search(question, top_k=top_k)
             except Exception as e:
                 logger.warning("Vector search failed: %s", e)
+            if year_period[0] or year_period[1]:
+                posts = _filter_posts_by_period(posts, *year_period)
 
         answer = self._get_answer_gen().generate(
             question,
             mode=mode,
             graph_facts=graph_facts,
             posts=posts,
+            source_posts=source_posts,
             communities=communities,
         )
 
@@ -187,7 +303,7 @@ class GraphRAGSearcher:
                     src = {"title": f.get("event") or f.get("person") or url, "url": url}
                     if src not in sources:
                         sources.append(src)
-        for p in posts[:8]:
+        for p in (source_posts + posts)[:10]:
             url = p.get("post_url")
             title = p.get("group_name") or url
             if url:
@@ -201,7 +317,7 @@ class GraphRAGSearcher:
             "media": media,
             "mode": mode,
             "facts_count": len(graph_facts),
-            "posts_used": len(posts),
+            "posts_used": len(posts) + len(source_posts),
         }
 
     def close(self):
