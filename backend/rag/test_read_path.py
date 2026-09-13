@@ -150,7 +150,18 @@ def test_partners_intent_query():
         {"intent": "partners", "org_filter": "Тесла", "org_exact": None, "limit": 20}
     )
     assert "SUPPORTED_BY" in q
+    assert "type(r) AS relation" in q
     assert params["org"] == "Тесла"
+
+
+def test_winners_query_has_participation_union():
+    q, params = query_for_plan(
+        {"intent": "winners", "org_filter": "РКТ", "org_exact": None, "limit": 20}
+    )
+    assert "UNION" in q
+    assert "PARTICIPATED_IN" in q
+    # Различение побед и участий — колонкой relation.
+    assert q.count("AS relation") == 2
 
 
 def test_org_exact_in_commanders_query():

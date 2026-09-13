@@ -64,7 +64,7 @@ class AnswerGenerator:
         for f in graph_facts[:60]:
             subj = f.get("subject") or f.get("person") or f.get("event") or f.get("id") or "?"
             rel = f.get("relation") or f.get("role_title") or ""
-            obj = f.get("object") or f.get("target") or f.get("award") or f.get("org") or f.get("location") or f.get("project") or ""
+            obj = f.get("object") or f.get("target") or f.get("award") or f.get("org") or f.get("partner") or f.get("location") or f.get("project") or ""
             event_date = (f.get("event_date") or "")[:10]
             observed_at = (f.get("observed_at") or "")[:10]
             date = f.get("date")

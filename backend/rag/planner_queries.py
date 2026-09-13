@@ -105,7 +105,7 @@ def commanders_query(plan: dict) -> Optional[tuple[str, dict]]:
         MATCH (p:Person {source_model:$model})-[r:COMMANDED|HOLDS_ROLE]->(o)
         WHERE (""" + _org_cond("o") + """)
         RETURN p.name AS person, r.role_title AS role_title, r.status AS status,
-                r.date AS date, """ + _V3_PROPS + """,
+                type(r) AS relation, r.date AS date, """ + _V3_PROPS + """,
                 r.description AS description,
                 r.source_post_url AS source_post_url
         ORDER BY """ + _exact_first("o") + """, p.name
@@ -122,7 +122,8 @@ def members_query(plan: dict) -> Optional[tuple[str, dict]]:
         """
         MATCH (p:Person {source_model:$model})-[r:MEMBER_OF]->(o)
         WHERE (""" + _org_cond("o") + """)
-        RETURN p.name AS person, o.name AS org, r.date AS date,
+        RETURN p.name AS person, o.name AS org, type(r) AS relation,
+                r.date AS date,
                 """ + _V3_PROPS + """,
                 r.description AS description, r.source_post_url AS source_post_url
         ORDER BY """ + _exact_first("o") + """, p.name
@@ -135,6 +136,10 @@ def members_query(plan: dict) -> Optional[tuple[str, dict]]:
 def winners_query(plan: dict) -> Optional[tuple[str, dict]]:
     if plan.get("intent") != "winners":
         return None
+    # Вторая ветвь UNION: участия в конкурсах, matching org, — не победы,
+    # но их посты-источники называют призёров (кейс РКТ: пост 10023).
+    # Различение — по колонке relation (WON_AWARD vs PARTICIPATED_IN),
+    # правило атрибуции наград — в BASE_PROMPT п.13.
     return (
         """
         MATCH (p:Person {source_model:$model})-[r:WON_AWARD]->(a)
@@ -143,9 +148,20 @@ def winners_query(plan: dict) -> Optional[tuple[str, dict]]:
                    AND (p.norm_id = $org_exact OR a.norm_id = $org_exact))
                OR toLower(toString(p.name)) CONTAINS toLower($org)
                OR toLower(toString(a.name)) CONTAINS toLower($org))
-        RETURN p.name AS person, a.name AS award, r.date AS date,
-                """ + _V3_PROPS + """,
+        RETURN p.name AS person, a.name AS award, type(r) AS relation,
+                r.date AS date, r.observed_at AS observed_at,
+                r.event_date AS event_date, r.role_status AS role_status,
                 r.description AS description, r.source_post_url AS source_post_url
+        UNION
+        MATCH (s:Entity {source_model:$model})-[r2:PARTICIPATED_IN]->(e:Event)
+        WHERE ($org IS NULL
+               OR ($org_exact IS NOT NULL
+                   AND (s.norm_id = $org_exact OR e.norm_id = $org_exact))
+               OR toLower(toString(e.name)) CONTAINS toLower($org))
+        RETURN s.name AS person, e.name AS award, type(r2) AS relation,
+                r2.date AS date, r2.observed_at AS observed_at,
+                r2.event_date AS event_date, r2.role_status AS role_status,
+                r2.description AS description, r2.source_post_url AS source_post_url
         LIMIT $limit
         """,
         _params(plan),
@@ -178,7 +194,7 @@ def partners_query(plan: dict) -> Optional[tuple[str, dict]]:
         WHERE (s:Squad OR s:Organization) AND o.source_model = $model
           AND (""" + _org_cond("s") + """)
         RETURN DISTINCT s.name AS subject, s.norm_id AS subject_norm,
-                o.name AS partner,
+                o.name AS partner, type(r) AS relation,
                 r.date AS date, """ + _V3_PROPS + """,
                 r.description AS description,
                 r.source_post_url AS source_post_url
