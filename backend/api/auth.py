@@ -64,6 +64,19 @@ def verify_admin_session(token: Optional[str] = Depends(get_bearer_token)) -> di
     return session
 
 
+def verify_admin_session_optional(
+    token: Optional[str] = Depends(get_bearer_token),
+) -> Optional[dict]:
+    """Необязательный admin: dict сессии при admin-токене, иначе None (панель «Рентген»)."""
+    if token is None:
+        return None
+    session = store.verify(token)
+    if session is None or session.get("role") != "admin":
+        return None
+    session["token"] = token
+    return session
+
+
 def verify_user(api_key: str = Security(api_key_header)) -> str:
     """X-API-Key: USER или ADMIN ключ (обратная совместимость, CLI/curl/бенчмарк)."""
     if api_key and hmac.compare_digest(api_key, ADMIN_API_KEY):

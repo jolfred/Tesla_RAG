@@ -5,7 +5,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from backend.config import SESSION_TTL, SESSIONS_DB
+from backend.config import SESSION_TTL, SESSIONS_DB, TESLA_ALL_ADMIN
 from backend.utils.logger import setup_logger
 
 logger = setup_logger("sessions")
@@ -57,6 +57,9 @@ class SessionStore:
 
     def create(self, role: str = "user", vk_user_id: Optional[str] = None) -> dict:
         """Создаёт сессию, возвращает {token, role, vk_user_id, expires_at}."""
+        # TEMP(ALL_ADMIN): все новые сессии админские. Откатить вместе с флагом.
+        if TESLA_ALL_ADMIN:
+            role = "admin"
         token = secrets.token_urlsafe(32)
         now = _utcnow()
         expires = now + timedelta(days=self.ttl_days)

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
-from backend.api.auth import verify_user_any
-from backend.api.schemas.chat import ChatRequest, ChatResponse, SourceInfo
+from backend.api.auth import verify_admin_session_optional, verify_user_any
+from backend.api.schemas.chat import ChatRequest, ChatResponse, ContextBlocks, SourceInfo
 from backend.rag.searcher import GraphRAGSearcher
 from backend.utils.logger import setup_logger
 
@@ -18,10 +18,17 @@ def _get_searcher():
 
 
 @router.post("/api/v1/chat", response_model=ChatResponse)
-async def chat(body: ChatRequest):
+async def chat(
+    body: ChatRequest,
+    role: str = Depends(verify_user_any),
+    admin: dict | None = Depends(verify_admin_session_optional),
+):
     searcher = _get_searcher()
+    # Панель «Рентген»: контекст только админу и только по запросу.
+    # (Пока TESLA_ALL_ADMIN=1 все сессии админские — см. TEMP-метку.)
+    want_context = bool(body.include_context and admin is not None)
     try:
-        result = searcher.search(body.question)
+        result = searcher.search(body.question, include_context=want_context)
         return ChatResponse(
             answer=result["answer"],
             sources=[SourceInfo(**s) for s in result["sources"]],
@@ -29,6 +36,9 @@ async def chat(body: ChatRequest):
             mode=result.get("mode", "basic"),
             facts_count=result.get("facts_count", 0),
             posts_used=result.get("posts_used", 0),
+            context=ContextBlocks(**(result.get("context") or {}))
+            if want_context
+            else None,
         )
     except Exception as e:
         logger.error(f"Chat error: {e}")

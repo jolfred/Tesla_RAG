@@ -63,6 +63,9 @@ USER_API_KEY = os.getenv("USER_API_KEY", "user-secret-key-change-me")
 
 # Sessions (opaque Bearer-токены)
 SESSION_TTL = int(os.getenv("SESSION_TTL", "30"))  # суток
+# TEMP(ALL_ADMIN): пока все новые сессии — админские (панель «Рентген» без
+# отдельного admin-входа). ОТКАТИТЬ перед продакшеном: удалить из .env + тесты.
+TESLA_ALL_ADMIN = os.getenv("TESLA_ALL_ADMIN", "") == "1"
 VK_APP_ID = os.getenv("VK_APP_ID", "")
 VK_APP_SECRET = os.getenv("VK_APP_SECRET", "")
 VK_ADMIN_IDS = {x.strip() for x in os.getenv("VK_ADMIN_IDS", "").split(",") if x.strip()}

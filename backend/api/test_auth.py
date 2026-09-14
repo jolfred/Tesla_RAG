@@ -43,7 +43,7 @@ def test_config(monkeypatch):
 
 
 class FakeSearcher:
-    def search(self, question):
+    def search(self, question, include_context=False):
         return {
             "answer": "Ответ от тестового поисковика",
             "sources": [{"title": "Источник", "url": "https://vk.com/test"}],
@@ -51,6 +51,7 @@ class FakeSearcher:
             "mode": "local",
             "facts_count": 1,
             "posts_used": 2,
+            "context": {"graph": "=== ФАКТЫ ===\n- тест"} if include_context else None,
         }
 
 
@@ -67,14 +68,14 @@ def test_guest_flow():
     resp = client.post("/api/v1/auth/guest")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["role"] == "user"
+    assert data["role"] == "admin"  # TEMP(ALL_ADMIN): откатить на "user"
     assert data["token"]
     assert data["expires_at"]
 
     me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {data['token']}"})
     assert me.status_code == 200
     me_data = me.json()
-    assert me_data["role"] == "user"
+    assert me_data["role"] == "admin"  # TEMP(ALL_ADMIN): откатить на "user"
     assert me_data["vk_user_id"] is None
     assert me_data["expires_at"] == data["expires_at"]
 
@@ -153,6 +154,34 @@ def test_chat_without_credentials_401(mock_searcher):
     assert resp.status_code == 401
 
 
+def test_chat_context_admin_only(mock_searcher):
+    # Панель «Рентген»: Bearer-админ + флаг -> контекст есть.
+    # (TEMP(ALL_ADMIN): гость сейчас админ; после отката брать admin-вход.)
+    guest = client.post("/api/v1/auth/guest").json()
+    resp = client.post(
+        "/api/v1/chat",
+        json={"question": "Тест", "include_context": True},
+        headers={"Authorization": f"Bearer {guest['token']}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["context"]["graph"] == "=== ФАКТЫ ===\n- тест"
+    # X-API-Key user + флаг -> контекста нет.
+    resp = client.post(
+        "/api/v1/chat",
+        json={"question": "Тест", "include_context": True},
+        headers={"X-API-Key": USER_KEY},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["context"] is None
+    # Без флага -> контекста нет даже у админа.
+    resp = client.post(
+        "/api/v1/chat",
+        json={"question": "Тест"},
+        headers={"Authorization": f"Bearer {guest['token']}"},
+    )
+    assert resp.json()["context"] is None
+
+
 # --- A-7: VK sign ---
 
 def test_vk_sign_correct_admin():
@@ -169,7 +198,7 @@ def test_vk_sign_correct_user_not_in_allowlist(monkeypatch):
     sign = "e508559584c372658ffbb9e5daeda707ffb00dbc2efee6b620ac2c7f9a7a445a"
     resp = client.post("/api/v1/auth/vk", json={"params": params, "sign": sign})
     assert resp.status_code == 200
-    assert resp.json()["role"] == "user"
+    assert resp.json()["role"] == "admin"  # TEMP(ALL_ADMIN): откатить на "user"
 
 
 def test_vk_sign_forged_params_401():

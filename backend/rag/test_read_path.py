@@ -88,7 +88,7 @@ def _searcher(router_mode, plan, facts, qtexts=None, vec_posts=None):
     vec._get_qdrant.return_value = FakeQdrant(qtexts or {})
     s._vec = vec
     gen = MagicMock()
-    gen.generate.return_value = "ответ"
+    gen.generate.return_value = ("ответ", {})
     s._answer_gen = gen
     return s, planner, vec, gen
 
@@ -177,6 +177,53 @@ def test_org_exact_in_commanders_query():
 
 def test_question_year_none_for_range():
     assert question_year("с 2024 по 2026") is None
+
+
+def test_generate_returns_answer_and_blocks():
+    # Панель «Рентген»: generate отдаёт секции дословно как в LLM.
+
+    class StubClient:
+        def __init__(self):
+            self.seen = None
+
+        def chat(self, messages, **kwargs):
+            self.seen = messages
+            return "ответ"
+
+    gen = AnswerGenerator()
+    stub = StubClient()
+    gen._client = stub
+    answer, blocks = gen.generate(
+        "кто командует",
+        mode="struct",
+        graph_facts=[{"person": "Иван", "relation": "COMMANDED",
+                      "event_date": "2026-04-01"}],
+        posts=[],
+        source_posts=[{"post_url": "u", "published_at": "2026-04-01",
+                       "group_name": "g", "text": "текст поста"}],
+    )
+    assert answer == "ответ"
+    assert "ФАКТЫ ИЗ ГРАФА" in blocks["graph"]
+    assert "Иван" in blocks["graph"]
+    assert "ПОСТЫ-ИСТОЧНИКИ" in blocks["source_posts"]
+    assert "posts" not in blocks  # пустые блоки не отдаём
+    assert "communities" not in blocks
+    # Системный промпт наружу не утекает — только user-контекст.
+    assert len(stub.seen) == 2
+
+
+def test_search_context_flag():
+    # include_context=False (по умолчанию) — контекст не раздувает ответ.
+    s, planner, vec, gen = _searcher(
+        "basic", {}, [],
+        vec_posts=[{"post_url": "u", "text": "t", "group_name": "g",
+                    "published_at": "2026-01-01"}],
+    )
+    gen.generate.return_value = ("ответ", {"posts": "=== ПОСТЫ ===\n..."})
+    out = s.search("привет")
+    assert out["context"] is None
+    out2 = s.search("привет", include_context=True)
+    assert out2["context"] == {"posts": "=== ПОСТЫ ===\n..."}
 
 
 def test_cards_for_fact_sources():

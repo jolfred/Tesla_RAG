@@ -40,6 +40,15 @@ export interface SourceInfo {
 export interface ChatRequest {
   question: string
   history?: unknown[]
+  // Панель «Рентген» (только admin): вернуть секции контекста дословно.
+  include_context?: boolean
+}
+
+export interface ContextBlocks {
+  graph?: string | null
+  source_posts?: string | null
+  posts?: string | null
+  communities?: string | null
 }
 
 export interface ChatResponse {
@@ -49,6 +58,7 @@ export interface ChatResponse {
   mode: ChatMode
   facts_count: number
   posts_used: number
+  context?: ContextBlocks | null
 }
 
 // --- Status (FR-4.x) ---

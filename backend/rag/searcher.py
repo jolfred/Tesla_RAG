@@ -230,7 +230,7 @@ class GraphRAGSearcher:
         logger.info("Resolved %d/%d source posts", len(posts), len(urls))
         return posts
 
-    def search(self, question: str, top_k: int = 8) -> dict:
+    def search(self, question: str, top_k: int = 8, include_context: bool = False) -> dict:
         logger.info("GraphRAG search: '%s'", question)
 
         mode = self._get_router().route(question)
@@ -316,7 +316,7 @@ class GraphRAGSearcher:
             if year_period[0] or year_period[1]:
                 posts = _filter_posts_by_period(posts, *year_period)
 
-        answer = self._get_answer_gen().generate(
+        answer, blocks = self._get_answer_gen().generate(
             question,
             mode=mode,
             graph_facts=graph_facts,
@@ -358,6 +358,9 @@ class GraphRAGSearcher:
             "mode": mode,
             "facts_count": len(graph_facts),
             "posts_used": len(posts) + len(source_posts),
+            # Панель «Рентген»: секции дословно как ушли в LLM. Только по запросу,
+            # чтобы не раздувать обычные ответы.
+            "context": blocks if include_context else None,
         }
 
     def close(self):

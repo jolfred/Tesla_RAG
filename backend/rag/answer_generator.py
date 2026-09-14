@@ -145,7 +145,13 @@ class AnswerGenerator:
         posts: list[dict] | None = None,
         source_posts: list[dict] | None = None,
         communities: list[dict] | None = None,
-    ) -> str:
+    ) -> tuple[str, dict[str, str]]:
+        """Ответ + секции контекста дословно как ушли в LLM (панель «Рентген»).
+
+        Возвращает (answer, sections). sections: {"graph"|"source_posts"|
+        "posts"|"communities": str} — только непустые блоки. Системный промпт
+        НЕ отдаём никогда.
+        """
         client = self._get_client()
         if client is None:
             return "Ошибка: LLM недоступна. Проверьте настройки провайдера."
@@ -155,9 +161,12 @@ class AnswerGenerator:
             system_prompt += GLOBAL_EXTRAS
 
         sections = []
+        blocks: dict[str, str] = {}
         if mode == "struct" and graph_facts:
             facts_str = self._fmt_facts(graph_facts)
-            sections.append("=== ФАКТЫ ИЗ ГРАФА ЗНАНИЙ ===\n" + facts_str)
+            block = "=== ФАКТЫ ИЗ ГРАФА ЗНАНИЙ ===\n" + facts_str
+            sections.append(block)
+            blocks["graph"] = block
         elif mode == "local" and graph_facts:
             lines = []
             for f in graph_facts[:40]:
@@ -171,7 +180,9 @@ class AnswerGenerator:
                 if links:
                     line += f" | связи: {links[:200]}"
                 lines.append(line)
-            sections.append("=== СУЩНОСТИ И ИХ СВЯЗИ ===\n" + "\n".join(lines))
+            block = "=== СУЩНОСТИ И ИХ СВЯЗИ ===\n" + "\n".join(lines)
+            sections.append(block)
+            blocks["graph"] = block
 
         if posts:
             post_lines = []
@@ -191,7 +202,9 @@ class AnswerGenerator:
                         f"- [{p.get('published_at', '')}] {p.get('group_name', '')}: "
                         f"{text[:400]} (URL: {p.get('post_url', '')})"
                     )
-            sections.append(header + "\n" + "\n".join(post_lines))
+            block = header + "\n" + "\n".join(post_lines)
+            sections.append(block)
+            blocks["posts"] = block
 
         if source_posts:
             # Посты-источники фактов (п.11): ИМЕННО те посты, на которых
@@ -203,9 +216,9 @@ class AnswerGenerator:
                     f"- [{p.get('published_at', '')}] {p.get('group_name', '')}: "
                     f"{text[:2000]} (URL: {p.get('post_url', '')})"
                 )
-            sections.append(
-                "=== ПОСТЫ-ИСТОЧНИКИ ФАКТОВ ===\n" + "\n".join(src_lines)
-            )
+            block = "=== ПОСТЫ-ИСТОЧНИКИ ФАКТОВ ===\n" + "\n".join(src_lines)
+            sections.append(block)
+            blocks["source_posts"] = block
 
         if mode == "global" and communities:
             comm_lines = []
@@ -214,12 +227,14 @@ class AnswerGenerator:
                 if summary:
                     comm_lines.append(f"• Сообщество {c.get('community_id')}: {summary[:600]}")
             if comm_lines:
-                sections.append("=== РЕЗЮМЕ СООБЩЕСТВ ===\n" + "\n".join(comm_lines))
+                block = "=== РЕЗЮМЕ СООБЩЕСТВ ===\n" + "\n".join(comm_lines)
+                sections.append(block)
+                blocks["communities"] = block
 
         context = "\n\n".join(sections) if sections else "Контекст отсутствует."
         user_msg = f"Вопрос: {question}\n\n{context}\n\nОтветь на вопрос пользователя."
         try:
-            return client.chat(
+            answer = client.chat(
                 [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_msg},
@@ -227,6 +242,7 @@ class AnswerGenerator:
                 temperature=0.2,
                 max_tokens=3072,
             )
+            return answer, blocks
         except Exception as e:
             logger.error(f"Answer generation failed: {e}")
-            return "Извините, произошла ошибка при генерации ответа."
+            return "Извините, произошла ошибка при генерации ответа.", blocks
