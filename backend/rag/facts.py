@@ -16,6 +16,7 @@ class Fact:
     """Строка графа в канонической форме."""
 
     person: str = "?"
+    subject: str | None = None  # субъект факта (напр. поддерживаемая сторона)
     role_title: str | None = None
     event_date: str | None = None
     observed_at: str | None = None
@@ -48,7 +49,8 @@ def rows_to_facts(rows: list[dict]) -> list[Fact]:
         label = next((r.get(k) for k in _LABEL_KEYS if r.get(k)), None)
         facts.append(
             Fact(
-                person=r.get("person") or r.get("subject") or "?",
+                person=r.get("person") or "?",
+                subject=r.get("subject"),
                 role_title=r.get("role_title"),
                 event_date=r.get("event_date"),
                 observed_at=r.get("observed_at"),

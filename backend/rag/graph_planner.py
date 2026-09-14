@@ -99,6 +99,24 @@ class GraphPlanner:
             logger.warning("Graph planner query failed: %s", e)
             return [], {"cypher": query, "params": params}
 
+    def execute_v2(self, plan: dict) -> tuple[list[dict], dict]:
+        """Выполнение плана v2 (строгие запросы по org_norm_id)."""
+        from backend.rag.planner_queries import query_for_plan_v2
+
+        graph = self._get_graph()
+        if graph is None:
+            return [], {"cypher": None, "params": {}}
+
+        candidate = query_for_plan_v2(plan)
+        if candidate is None:
+            return [], {"cypher": None, "params": {}}
+        query, params = candidate
+        try:
+            return graph.search_cypher(query, params), {"cypher": query, "params": params}
+        except Exception as e:
+            logger.warning("Graph planner v2 query failed: %s", e)
+            return [], {"cypher": query, "params": params}
+
     def close(self):
         if self._graph is not None:
             self._graph.close()

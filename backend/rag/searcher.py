@@ -3,10 +3,13 @@ import re
 import uuid
 from pathlib import Path
 
+from backend.config import QUERY_PIPELINE_VERSION
 from backend.embeddings.vec_search import VectorSearcher
+from backend.rag import query_planner
 from backend.rag.answer_generator import AnswerGenerator
 from backend.rag.graph_planner import GraphPlanner
 from backend.rag.query_router import QueryRouter
+from backend.rag.renderers import render
 from backend.utils.logger import setup_logger
 
 logger = setup_logger("searcher")
@@ -247,7 +250,39 @@ class GraphRAGSearcher:
         logger.info("Resolved %d/%d source posts", len(posts), len(urls))
         return posts
 
+    @staticmethod
+    def _collect_sources(mode, graph_facts, source_posts, posts) -> list[dict]:
+        # источники: сначала URL из фактов графа (релевантны периоду),
+        # затем из векторных постов
+        sources = []
+        if mode == "struct":
+            for f in graph_facts:
+                urls: list[str] = []
+                if f.get("source_post_url"):
+                    urls.append(f["source_post_url"])
+                for link in f.get("links") or []:
+                    u = link.get("source_post_url")
+                    if u and u not in urls:
+                        urls.append(u)
+                for s in f.get("sources") or []:
+                    if s and s not in urls:
+                        urls.append(s)
+                for url in urls[:3]:
+                    src = {"title": f.get("event") or f.get("person") or url, "url": url}
+                    if src not in sources:
+                        sources.append(src)
+        for p in (source_posts + posts)[:10]:
+            url = p.get("post_url")
+            title = p.get("group_name") or url
+            if url:
+                src = {"title": title, "url": url}
+                if src not in sources:
+                    sources.append(src)
+        return sources
+
     def search(self, question: str, top_k: int = 8, include_context: bool = False) -> dict:
+        if QUERY_PIPELINE_VERSION == "v2":
+            return self._search_v2(question, top_k, include_context)
         logger.info("GraphRAG search: '%s'", question)
 
         # Sink'и полных обменов с LLM (панель «Рентген»): по одному списку
@@ -358,31 +393,7 @@ class GraphRAGSearcher:
             trace_sink=answer_sink,
         )
 
-        # источники: сначала URL из фактов графа (релевантны периоду),
-        # затем из векторных постов
-        if mode == "struct":
-            for f in graph_facts:
-                urls: list[str] = []
-                if f.get("source_post_url"):
-                    urls.append(f["source_post_url"])
-                for link in f.get("links") or []:
-                    u = link.get("source_post_url")
-                    if u and u not in urls:
-                        urls.append(u)
-                for s in f.get("sources") or []:
-                    if s and s not in urls:
-                        urls.append(s)
-                for url in urls[:3]:
-                    src = {"title": f.get("event") or f.get("person") or url, "url": url}
-                    if src not in sources:
-                        sources.append(src)
-        for p in (source_posts + posts)[:10]:
-            url = p.get("post_url")
-            title = p.get("group_name") or url
-            if url:
-                src = {"title": title, "url": url}
-                if src not in sources:
-                    sources.append(src)
+        sources = self._collect_sources(mode, graph_facts, source_posts, posts)
 
         if include_context:
             planner_extra = ""
@@ -415,6 +426,144 @@ class GraphRAGSearcher:
             "context": blocks if include_context else None,
             "trace": trace,
             "calls": calls,
+        }
+
+    def _search_v2(
+        self, question: str, top_k: int = 8, include_context: bool = False
+    ) -> dict:
+        """Путь v2 (Фаза 4): единый classify+plan, диспетчер enumerable/narrative.
+
+        enumerable + факты -> шаблон (0 LLM-вызовов на ответе);
+        шаблон пуст -> vector-fallback -> LLM; оба пусты -> тишина без LLM.
+        """
+        logger.info("GraphRAG search v2: '%s'", question)
+        plan_sink: list = []
+        answer_sink: list = []
+
+        plan = query_planner.classify_and_plan(
+            question,
+            graph=self._get_planner()._get_graph(),
+            trace_sink=plan_sink,
+        )
+        mode = plan.mode
+        logger.info("v2 plan: intent=%s mode=%s kind=%s org=%s",
+                    plan.intent, mode, plan.kind, plan.org_norm_id)
+
+        graph_facts: list = []
+        posts: list = []
+        source_posts: list = []
+        communities: list = []
+        plan_debug: dict = {}
+
+        year = question_year(question)
+        year_period = (f"{year}-01-01", f"{year}-12-31") if year else (None, None)
+
+        if mode in ("struct", "local"):
+            try:
+                graph_facts, plan_debug = self._get_planner().execute_v2(
+                    plan.to_dict()
+                )
+            except Exception as e:
+                logger.warning("v2 planner execution failed: %s", e)
+            try:
+                graph_facts.sort(key=_fact_date, reverse=True)
+            except Exception:
+                pass
+            if graph_facts:
+                source_posts = self._resolve_source_posts(graph_facts)
+                try:
+                    cards = self._cards_for_fact_sources(graph_facts)
+                    seen = {p.get("post_url") for p in posts}
+                    posts = [c for c in cards if c["post_url"] not in seen] + posts
+                except Exception as e:
+                    logger.warning("Group card resolve failed: %s", e)
+            else:
+                try:
+                    posts = self._get_vec().search(question, top_k=5)
+                except Exception as e:
+                    logger.warning("Vector fallback failed: %s", e)
+            if mode == "struct":
+                pstart = plan.period_start or year_period[0]
+                pend = plan.period_end or year_period[1]
+                if pstart or pend:
+                    source_posts = _filter_posts_by_period(source_posts, pstart, pend)
+                    posts = _filter_posts_by_period(posts, pstart, pend)
+        elif mode == "global":
+            communities = self._load_communities()
+        else:  # basic
+            try:
+                posts = self._get_vec().search(question, top_k=top_k)
+            except Exception as e:
+                logger.warning("Vector search failed: %s", e)
+            if year_period[0] or year_period[1]:
+                posts = _filter_posts_by_period(posts, *year_period)
+
+        rendered = None
+        if plan.kind == "enumerable" and mode == "struct" and graph_facts:
+            org_name = plan.org_filter or plan.org_norm_id or "?"
+            rendered = render(plan.intent, graph_facts, org_name)
+
+        answer_sink_note = ""
+        if rendered is not None:
+            answer = rendered
+            blocks: dict = {"rendered": rendered} if include_context else {}
+        elif plan.kind == "enumerable" and not graph_facts and not posts:
+            # Оба источника пусты — тишина сразу, без LLM-вызова.
+            answer = "В архивах нет данных"
+            blocks = {}
+            answer_sink_note = "— без LLM (оба источника пусты) —"
+        else:
+            answer, blocks = self._get_answer_gen().generate(
+                question,
+                mode=mode,
+                graph_facts=graph_facts,
+                posts=posts,
+                source_posts=source_posts,
+                communities=communities,
+                trace_sink=answer_sink,
+            )
+
+        sources = self._collect_sources(mode, graph_facts, source_posts, posts)
+
+        if include_context:
+            cypher = (plan_debug or {}).get("cypher")
+            planner_extra = (
+                f"=== ПЛАН ===\n"
+                f"{json.dumps(plan.to_dict(), ensure_ascii=False, indent=2)}\n\n"
+                f"=== CYPHER ===\n{cypher}\n\n"
+                f"=== ПАРАМЕТРЫ ===\n"
+                f"{json.dumps((plan_debug or {}).get('params', {}), ensure_ascii=False, indent=2)}\n\n"
+                f"=== СТРОКИ ГРАФА ===\n"
+                f"{json.dumps((graph_facts or [])[:20], ensure_ascii=False, indent=2)}"
+                if cypher else
+                f"=== ПЛАН ===\n"
+                f"{json.dumps(plan.to_dict(), ensure_ascii=False, indent=2)}"
+            )
+            answer_text = (
+                _fmt_call_window(answer_sink)
+                if answer_sink
+                else (answer_sink_note or f"=== ШАБЛОН ===\n{answer}")
+            )
+            calls = [
+                {"title": "Вызов 1 — план (v2)",
+                 "text": _fmt_call_window(plan_sink, planner_extra)},
+                {"title": "Вызов 2 — ответ", "text": answer_text},
+            ]
+        else:
+            calls = None
+
+        return {
+            "answer": answer,
+            "sources": sources,
+            "media": [],
+            "mode": mode,
+            "facts_count": len(graph_facts),
+            "posts_used": len(posts) + len(source_posts),
+            "context": blocks if include_context else None,
+            "trace": None,
+            "calls": calls,
+            # Метрика Фазы 6: сколько LLM-вызовов ушло на вопрос.
+            "llm_calls": plan.llm_calls + len(answer_sink),
         }
 
     def close(self):
