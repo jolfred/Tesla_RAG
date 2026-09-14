@@ -34,6 +34,14 @@ GLOBAL_EXTRAS = """
 Обобщи главные темы и выводы, перечисли ключевые события/людей, упомянутые в резюме.
 """
 
+# Фаза 5: правило 16 — прямой фикс домысла «который является частью Штаба».
+# Список «связанные сообщества» и соседство групп в VK — НЕ структурная связь.
+NARRATIVE_PROMPT = BASE_PROMPT + """
+16. Не делай выводов об организационной иерархии и подчинённости из списка
+«связанные сообщества» и соседства групп в VK — это не структурная связь.
+Иерархия — только при явном PART_OF-факте в графе или прямой формулировке
+поста («входит в состав», «подразделение», «создан на базе»)."""
+
 
 class AnswerGenerator:
     def __init__(self):
@@ -66,7 +74,7 @@ class AnswerGenerator:
             return "Нет данных графа."
         lines = []
         for f in facts[:60]:
-            subj = f.person if f.person != "?" else (f.label or "?")
+            subj = f.person if f.person != "?" else (f.subject or f.label or "?")
             rel = f.role_title or f.relation or ""
             obj = f.org or ""
             event_date = (f.event_date or "")[:10]
@@ -139,6 +147,54 @@ class AnswerGenerator:
                 part += f" [{url}]"
             parts.append(part)
         return "; ".join(parts)
+
+    def answer_entity_detail(
+        self,
+        question: str,
+        structured: str | None,
+        posts: list[dict] | None = None,
+        trace_sink: list | None = None,
+    ) -> tuple[str, dict[str, str]]:
+        """Фаза 5: структурный блок + LLM-абзац раздельными кусками.
+
+        Галлюцинация в прозе не портит факты: детерминированный блок идёт
+        первым как есть, narrative пишется только по постам (NARRATIVE_PROMPT
+        с правилом 16). Возвращает (answer, blocks) как generate().
+        """
+        client = self._get_client()
+        if client is None:
+            return "Ошибка: LLM недоступна. Проверьте настройки провайдера.", {}
+        blocks: dict[str, str] = {}
+        if structured:
+            blocks["structured"] = structured
+        post_lines = []
+        for p in (posts or [])[:6]:
+            text = p.get("text") or ""
+            post_lines.append(
+                f"- [{p.get('published_at', '')}] {p.get('group_name', '')}: "
+                f"{text[:400]} (URL: {p.get('post_url', '')})"
+            )
+        if post_lines:
+            blocks["posts"] = "=== ПОСТЫ ===\n" + "\n".join(post_lines)
+        context = "\n\n".join(
+            b for b in [blocks.get("posts")] if b
+        ) or "Контекст отсутствует."
+        user_msg = f"Вопрос: {question}\n\n{context}\n\nОтветь на вопрос пользователя."
+        try:
+            narrative = client.chat(
+                [
+                    {"role": "system", "content": NARRATIVE_PROMPT},
+                    {"role": "user", "content": user_msg},
+                ],
+                temperature=0.2,
+                max_tokens=3072,
+                trace_sink=trace_sink,
+            )
+        except Exception as e:
+            logger.error(f"Entity-detail narrative failed: {e}")
+            narrative = ""
+        answer = "\n\n".join([b for b in [structured, narrative] if b])
+        return answer, blocks
 
     def generate(
         self,

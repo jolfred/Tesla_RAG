@@ -107,3 +107,82 @@ def test_v1_default_unaffected(monkeypatch):
     assert mod.QUERY_PIPELINE_VERSION == "v1"
     s.search("привет")
     assert called == []
+
+
+def test_rule16_in_narrative_prompt():
+    from backend.rag.answer_generator import NARRATIVE_PROMPT
+    assert "связанные сообщества" in NARRATIVE_PROMPT
+    assert "PART_OF" in NARRATIVE_PROMPT
+
+
+def test_answer_entity_detail_joins_blocks():
+    from backend.rag.answer_generator import AnswerGenerator
+
+    class StubClient:
+        def __init__(self):
+            self.seen = None
+
+        def chat(self, messages, **kwargs):
+            self.seen = messages
+            sink = kwargs.get("trace_sink")
+            if sink is not None:
+                sink.append({"messages": [dict(m) for m in messages],
+                             "response": "проза"})
+            return "проза"
+
+    gen = AnswerGenerator()
+    stub = StubClient()
+    gen._client = stub
+    answer, blocks = gen.answer_entity_detail(
+        "Кто такой Даниил Астафьев?",
+        "«Даниил Астафьев»:\n• Руководитель — Штаб",
+        [{"post_url": "u", "published_at": "2026-01-01",
+          "group_name": "g", "text": "текст"}],
+    )
+    assert answer.startswith("«Даниил Астафьев»:\n• Руководитель — Штаб")
+    assert answer.endswith("проза")
+    assert "16." in stub.seen[0]["content"]  # правило 16 ушло в модель
+    assert set(blocks) == {"structured", "posts"}
+
+
+def test_person_roles_query_shape():
+    from backend.rag.planner_queries import person_roles_query
+    q, params = person_roles_query("Астафьев")
+    assert "o.name AS org" in q and params["name"] == "Астафьев"
+    assert person_roles_query("") is None
+
+
+def test_v2_entity_detail_path(monkeypatch):
+    plan = QueryPlan(intent="entity_detail", mode="local", kind="narrative",
+                     target_name="Астафьев", llm_calls=1)
+    monkeypatch.setattr(mod, "QUERY_PIPELINE_VERSION", "v2")
+    monkeypatch.setattr(
+        mod.query_planner, "classify_and_plan",
+        lambda q, graph=None, trace_sink=None: plan,
+    )
+    s = mod.GraphRAGSearcher()
+    planner = MagicMock()
+    graph = MagicMock()
+    graph.search_cypher.return_value = [
+        {"person": "Даниил Астафьев", "org": "Штаб СО КГЭУ «Тесла»",
+         "role_title": "Руководитель", "relation": "COMMANDED",
+         "event_date": "2026-04-01"},
+    ]
+    planner._get_graph.return_value = graph
+    s._planner = planner
+    vec = MagicMock()
+    vec.search.return_value = []
+    vec._get_qdrant.side_effect = RuntimeError("no qdrant")
+    s._vec = vec
+    gen = MagicMock()
+    gen.answer_entity_detail.return_value = ("структура\n\nпроза", {})
+    s._answer_gen = gen
+    out = s.search("Кто такой Даниил Астафьев?", include_context=True)
+    assert out["mode"] == "local" and out["facts_count"] == 1
+    assert out["answer"] == "структура\n\nпроза"
+    structured = gen.answer_entity_detail.call_args[0][1]
+    assert structured.startswith("«Даниил Астафьев»:")
+    assert "Руководитель — Штаб СО КГЭУ «Тесла»" in structured
+    assert out["llm_calls"] == 1
+    assert [c["title"] for c in out["calls"]] == [
+        "Вызов 1 — план (v2)", "Вызов 2 — ответ"]

@@ -8,8 +8,10 @@ from backend.embeddings.vec_search import VectorSearcher
 from backend.rag import query_planner
 from backend.rag.answer_generator import AnswerGenerator
 from backend.rag.graph_planner import GraphPlanner
+from backend.rag.facts import rows_to_facts
+from backend.rag.planner_queries import person_roles_query
 from backend.rag.query_router import QueryRouter
-from backend.rag.renderers import render
+from backend.rag.renderers import render, render_person_roles
 from backend.utils.logger import setup_logger
 
 logger = setup_logger("searcher")
@@ -458,6 +460,10 @@ class GraphRAGSearcher:
         year = question_year(question)
         year_period = (f"{year}-01-01", f"{year}-12-31") if year else (None, None)
 
+        if plan.intent == "entity_detail" and plan.target_name:
+            return self._search_v2_entity(
+                question, plan, top_k, include_context, plan_sink, year_period)
+
         if mode in ("struct", "local"):
             try:
                 graph_facts, plan_debug = self._get_planner().execute_v2(
@@ -563,6 +569,61 @@ class GraphRAGSearcher:
             "trace": None,
             "calls": calls,
             # Метрика Фазы 6: сколько LLM-вызовов ушло на вопрос.
+            "llm_calls": plan.llm_calls + len(answer_sink),
+        }
+
+    def _search_v2_entity(
+        self, question, plan, top_k, include_context, plan_sink, year_period
+    ) -> dict:
+        """Фаза 5: entity_detail — структурный блок ролей + LLM-абзац раздельно."""
+        answer_sink: list = []
+        graph = self._get_planner()._get_graph()
+        rows: list = []
+        if graph is not None:
+            candidate = person_roles_query(plan.target_name or "")
+            if candidate is not None:
+                query, params = candidate
+                try:
+                    rows = graph.search_cypher(query, params)
+                except Exception as e:
+                    logger.warning("v2 person roles failed: %s", e)
+        try:
+            rows.sort(key=_fact_date, reverse=True)
+        except Exception:
+            pass
+        structured = render_person_roles(
+            rows_to_facts(rows), plan.target_name or "?")
+        source_posts = self._resolve_source_posts(rows) if rows else []
+        try:
+            posts = self._get_vec().search(question, top_k=5)
+        except Exception as e:
+            logger.warning("Vector search failed: %s", e)
+            posts = []
+        if year_period[0] or year_period[1]:
+            posts = _filter_posts_by_period(posts, *year_period)
+        answer, blocks = self._get_answer_gen().answer_entity_detail(
+            question, structured, source_posts + posts, trace_sink=answer_sink,
+        )
+        sources = self._collect_sources("local", rows, source_posts, posts)
+        if include_context:
+            calls = [
+                {"title": "Вызов 1 — план (v2)",
+                 "text": _fmt_call_window(plan_sink,
+                        f"=== ПЛАН ===\n{json.dumps(plan.to_dict(), ensure_ascii=False, indent=2)}")},
+                {"title": "Вызов 2 — ответ", "text": _fmt_call_window(answer_sink)},
+            ]
+        else:
+            calls = None
+        return {
+            "answer": answer,
+            "sources": sources,
+            "media": [],
+            "mode": "local",
+            "facts_count": len(rows),
+            "posts_used": len(posts) + len(source_posts),
+            "context": blocks if include_context else None,
+            "trace": None,
+            "calls": calls,
             "llm_calls": plan.llm_calls + len(answer_sink),
         }
 

@@ -356,3 +356,28 @@ def query_for_plan_v2(plan: dict) -> Optional[tuple[str, dict]]:
         if result is not None:
             return result
     return query_for_plan(plan)
+
+
+def person_roles_query(target_name: str) -> Optional[tuple[str, dict]]:
+    """Роли конкретной персоны (Фаза 5, read-only lookup).
+
+    CONTAINS здесь допустим: ищется явно названная сущность, а не
+    склейка организации. Возвращает и o.name AS org — рендеру персон
+    нужна организация каждой роли.
+    """
+    if not target_name:
+        return None
+    return (
+        """
+        MATCH (p:Person {source_model:$model})-[r:COMMANDED|HOLDS_ROLE|MEMBER_OF]->(o)
+        WHERE o.source_model = $model
+          AND toLower(toString(p.name)) CONTAINS toLower($name)
+        RETURN p.name AS person, o.name AS org, r.role_title AS role_title,
+                type(r) AS relation, r.date AS date, """ + _V3_PROPS + """,
+                r.description AS description,
+                r.source_post_url AS source_post_url
+        ORDER BY o.name
+        LIMIT 50
+        """,
+        {"model": MODEL, "name": target_name},
+    )

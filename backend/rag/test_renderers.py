@@ -63,6 +63,21 @@ def test_render_partners_events_projects_locations():
     )
 
 
+def test_render_person_roles_exact():
+    facts = [
+        Fact(person="Даниил Астафьев", role_title="Руководитель",
+             org="Штаб СО КГЭУ «Тесла»", event_date="2026-04-01"),
+        Fact(person="Даниил Астафьев", role_title="Командир",
+             org="Монолит", role_status="former"),
+    ]
+    assert r.render_person_roles(facts, "Даниил Астафьев") == (
+        "«Даниил Астафьев»:\n"
+        "• Руководитель — Штаб СО КГЭУ «Тесла» (с 2026-04-01)\n"
+        "• Командир — Монолит [экс]"
+    )
+    assert r.render_person_roles([], "X") is None
+
+
 def test_progresslab_note_when_not_subordinate(monkeypatch):
     monkeypatch.setattr(r, "PROGRESSLAB_IS_SUBORDINATE", False)
     out = r.render_commanders(

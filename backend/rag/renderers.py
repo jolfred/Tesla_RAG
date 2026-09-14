@@ -119,6 +119,26 @@ def render_events(facts: list[Fact], org_name: str) -> str | None:
     return f"Мероприятия «{org_name}»:\n" + "\n".join(lines)
 
 
+def render_person_roles(facts: list[Fact], person_name: str) -> str | None:
+    """Фаза 5: детерминированный блок ролей персоны для entity_detail."""
+    if not facts:
+        return None
+    name = next((f.person for f in facts if f.person != "?"), person_name)
+    lines = []
+    for f in facts:
+        role = f.role_title or f.relation or "роль не указана"
+        org = f.org or f.label or "?"
+        line = f"• {role} — {org}"
+        if f.event_date:
+            line += f" (с {f.event_date[:10]})"
+        elif f.observed_at:
+            line += f" (упоминание от {f.observed_at[:10]})"
+        if f.role_status == "former":
+            line += " [экс]"
+        lines.append(line)
+    return f"«{name}»:\n" + "\n".join(lines)
+
+
 RENDERERS = {
     "units": render_units,
     "commanders": render_commanders,
