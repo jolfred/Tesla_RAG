@@ -1,4 +1,5 @@
 from backend.config import LLM_PROVIDER
+from backend.rag.facts import Fact, rows_to_facts
 from backend.utils.gigachat_client import GigaChatClient
 from backend.utils.logger import setup_logger
 
@@ -58,17 +59,19 @@ class AnswerGenerator:
 
     @staticmethod
     def _fmt_facts(graph_facts: list[dict]) -> str:
-        if not graph_facts:
+        # Фаза 3: форматируем из Fact (одна точка правды), не из сырого dict.
+        # role_title — первичен: «Комиссар», а не голый тип связи COMMANDED.
+        facts = rows_to_facts(graph_facts)
+        if not facts:
             return "Нет данных графа."
         lines = []
-        for f in graph_facts[:60]:
-            subj = f.get("subject") or f.get("person") or f.get("event") or f.get("id") or "?"
-            rel = f.get("relation") or f.get("role_title") or ""
-            obj = f.get("object") or f.get("target") or f.get("award") or f.get("org") or f.get("partner") or f.get("location") or f.get("project") or ""
-            event_date = (f.get("event_date") or "")[:10]
-            observed_at = (f.get("observed_at") or "")[:10]
-            date = f.get("date")
-            description = f.get("description") or ""
+        for f in facts[:60]:
+            subj = f.person if f.person != "?" else (f.label or "?")
+            rel = f.role_title or f.relation or ""
+            obj = f.org or ""
+            event_date = (f.event_date or "")[:10]
+            observed_at = (f.observed_at or "")[:10]
+            date = f.date
             job = subj
             if rel:
                 job += f" ({rel}"
@@ -86,24 +89,24 @@ class AnswerGenerator:
             elif date:
                 job += f" | дата: {date}"
             line = job
-            if f.get("status"):
-                line += f" [{f['status']}]"
-            if f.get("role_status") == "former":
+            if f.status:
+                line += f" [{f.status}]"
+            if f.role_status == "former":
                 line += " [экс/бывший]"
-            if description:
-                line += f" — {description[:120]}"
-            if not (rel or obj or date) and f.get("links"):
-                dates = sorted({l.get("date") for l in f["links"] if l.get("date")})
+            if f.description:
+                line += f" — {f.description[:120]}"
+            if not (rel or obj or date) and f.links:
+                dates = sorted({l.get("date") for l in f.links if l.get("date")})
                 if dates:
                     line += f" | даты: {', '.join(d[:10] for d in dates[:5])}"
             urls = []
-            if f.get("source_post_url"):
-                urls.append(f["source_post_url"])
-            for l in (f.get("links") or []):
+            if f.source_post_url:
+                urls.append(f.source_post_url)
+            for l in f.links or []:
                 u = l.get("source_post_url")
                 if u and u not in urls:
                     urls.append(u)
-            for s in (f.get("sources") or []):
+            for s in f.sources or []:
                 if s and s not in urls:
                     urls.append(s)
             if urls:
