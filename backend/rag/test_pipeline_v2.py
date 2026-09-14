@@ -17,7 +17,6 @@ ROWS = [
 
 
 def _v2_searcher(monkeypatch, plan, rows, vec_posts=None):
-    monkeypatch.setattr(mod, "QUERY_PIPELINE_VERSION", "v2")
     monkeypatch.setattr(
         mod.query_planner, "classify_and_plan",
         lambda q, graph=None, trace_sink=None: plan,
@@ -88,25 +87,13 @@ def test_v2_narrative_path_uses_llm(monkeypatch):
     assert out["mode"] == "basic"
 
 
-def test_v1_default_unaffected(monkeypatch):
-    """Флаг по умолчанию v1: _search_v2 не вызывается."""
-    import backend.config as cfg
-    assert cfg.QUERY_PIPELINE_VERSION == "v1"
-    s = mod.GraphRAGSearcher()
-    called = []
-    s._search_v2 = lambda *a, **k: called.append(True) or {}
-    s._router = MagicMock()
-    s._router.route.return_value = "basic"
-    vec = MagicMock()
-    vec.search.return_value = []
-    s._vec = vec
-    gen = MagicMock()
-    gen.generate.return_value = ("a", {})
-    s._answer_gen = gen
-    # QUERY_PIPELINE_VERSION в модуле searcher — v1
-    assert mod.QUERY_PIPELINE_VERSION == "v1"
-    s.search("привет")
-    assert called == []
+def test_router_module_removed():
+    """Cutover: роутера больше нет — единый путь, откат только git'ом."""
+    import pytest
+
+    assert not hasattr(mod.GraphRAGSearcher, "_get_router")
+    with pytest.raises(ImportError):
+        import backend.rag.query_router  # noqa: F401
 
 
 def test_rule16_in_narrative_prompt():
@@ -155,7 +142,6 @@ def test_person_roles_query_shape():
 def test_v2_entity_detail_path(monkeypatch):
     plan = QueryPlan(intent="entity_detail", mode="local", kind="narrative",
                      target_name="Астафьев", llm_calls=1)
-    monkeypatch.setattr(mod, "QUERY_PIPELINE_VERSION", "v2")
     monkeypatch.setattr(
         mod.query_planner, "classify_and_plan",
         lambda q, graph=None, trace_sink=None: plan,

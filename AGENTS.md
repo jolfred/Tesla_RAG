@@ -80,7 +80,7 @@ docker run --rm -v $PWD/frontend:/app -v graphrag_npm_cache:/root/.npm -w /app n
 - `scraper/` — сбор VK-постов → `storage/posts/posts_*.jsonl`, метаданных групп → `storage/groups/`.
 - `backend/indexer/indexer.py` — JSONL → эмбеддинг + LLM-извлечение графа → Neo4j + Qdrant `posts`. `group_indexer.py` — группы в Neo4j + карточки в Qdrant.
 - `backend/scripts/build_communities.py` — Louvain-кластеризация Neo4j → `storage/communities.json` (с резюме через GigaChat).
-- `backend/rag/` — роутинг вопроса (struct/local/global/basic → `query_router.py`), Cypher-планировщик (`graph_planner.py`), поиск по Qdrant `posts` + карточки групп (`searcher.py`), генерация ответа (`answer_generator.py`). Интенты `units`/`commanders` важны для вопросов про отряды/контакты.
+- `backend/rag/` — единый путь: `query_planner.classify_and_plan` (1 LLM-вызов: интент+слоты) → строгий Cypher (`graph_planner.execute_v2` + `planner_queries.query_for_plan_v2`) → диспетчер `searcher` (enumerable — детерминированный шаблон `renderers`, 0 LLM; иначе LLM-ответ). Интенты `units`/`commanders` важны для вопросов про отряды/контакты.
 - `backend/api/routes/` — `chat` (user-ключ), `communities`, `index`, `documents` (admin-ключ), `status` (публичный). Авторизация — заголовок `X-API-Key` (ключи в `.env`: `USER_API_KEY`, `ADMIN_API_KEY`).
 - `backend/graph/graph_builder.py` — вспомогательный класс (старый документный путь, `create_constraints` ставит constraint на `merge_key`).
 
@@ -88,7 +88,7 @@ docker run --rm -v $PWD/frontend:/app -v graphrag_npm_cache:/root/.npm -w /app n
 
 - Посты: `storage/posts/*.jsonl` → `indexer` → Neo4j `:Entity`/`RELATES` + Qdrant `posts`.
 - Сообщества: Neo4j → `build_communities.py` → `storage/communities.json` (используется для global-режима).
-- Ответы: вопрос → `searcher.search()` → режим по `query_router` → источники `group://` и `vk.com` в ответе.
+- Ответы: вопрос → `searcher.search()` → план (`query_planner`) → источники `group://` и `vk.com` в ответе.
 
 ## Мониторинг
 

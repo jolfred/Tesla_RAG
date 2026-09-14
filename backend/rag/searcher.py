@@ -3,22 +3,16 @@ import re
 import uuid
 from pathlib import Path
 
-from backend.config import QUERY_PIPELINE_VERSION
 from backend.embeddings.vec_search import VectorSearcher
 from backend.rag import query_planner
 from backend.rag.answer_generator import AnswerGenerator
-from backend.rag.graph_planner import GraphPlanner
 from backend.rag.facts import rows_to_facts
+from backend.rag.graph_planner import GraphPlanner
 from backend.rag.planner_queries import person_roles_query
-from backend.rag.query_router import QueryRouter
 from backend.rag.renderers import render, render_person_roles
 from backend.utils.logger import setup_logger
 
 logger = setup_logger("searcher")
-
-# ТЕСТ п.11: struct без вектора — контекст только из постов-источников фактов.
-# Откат: True. Тогда struct снова подмешивает векторный top-5.
-STRUCT_USE_VECTOR = False
 
 _YEAR_RE = re.compile(r"(?:19|20)\d{2}")
 
@@ -99,16 +93,10 @@ GROUPS_DIR = Path(__file__).resolve().parent.parent.parent / "storage" / "groups
 
 class GraphRAGSearcher:
     def __init__(self):
-        self._router = None
         self._planner = None
         self._vec = None
         self._answer_gen = None
         self._communities = None
-
-    def _get_router(self):
-        if self._router is None:
-            self._router = QueryRouter()
-        return self._router
 
     def _get_planner(self):
         if self._planner is None:
@@ -283,162 +271,12 @@ class GraphRAGSearcher:
         return sources
 
     def search(self, question: str, top_k: int = 8, include_context: bool = False) -> dict:
-        if QUERY_PIPELINE_VERSION == "v2":
-            return self._search_v2(question, top_k, include_context)
-        logger.info("GraphRAG search: '%s'", question)
-
-        # Sink'и полных обменов с LLM (панель «Рентген»): по одному списку
-        # на вызов, живут в локалях — параллельные запросы не перемешиваются.
-        router_sink: list = []
-        planner_sink: list = []
-        answer_sink: list = []
-
-        mode = self._get_router().route(question, trace_sink=router_sink)
-        logger.info("Question mode: %s", mode)
-
-        graph_facts = []
-        posts = []
-        source_posts = []
-        communities = []
-        sources = []
-        media = []
-
-        # Год из вопроса — один раз, на все пути (п.8, только на время теста).
-        year = question_year(question)
-        year_period = (f"{year}-01-01", f"{year}-12-31") if year else (None, None)
-
-        # Трейс конвейера для панели «Рентген» (только по запросу).
-        trace: dict = {"router": {"mode": mode}, "planner": None}
-        plan_debug: dict = {}
-
-        if mode in ("struct", "local"):
-            plan = None
-            try:
-                plan = self._get_planner().plan(question, trace_sink=planner_sink)
-                # Точная резолюция организации (C4) до выполнения запроса.
-                plan["org_exact"] = self._get_planner().resolve_org_exact(
-                    plan.get("org_filter")
-                )
-                graph_facts, plan_debug = self._get_planner().execute(plan)
-                trace["planner"] = {
-                    "plan": plan,
-                    "cypher": plan_debug.get("cypher"),
-                    "params": plan_debug.get("params", {}),
-                }
-            except Exception as e:
-                logger.warning("Planner execution failed: %s", e)
-            # Temporal-приоритет (п.10): свежие факты первыми.
-            try:
-                graph_facts.sort(key=_fact_date, reverse=True)
-            except Exception:
-                pass
-            if graph_facts:
-                # Контекст — ИМЕННО посты-источники фактов (п.11, тест).
-                # Работает и для local: у фактов entity_detail есть links с URL.
-                source_posts = self._resolve_source_posts(graph_facts)
-                if mode == "struct" and STRUCT_USE_VECTOR:
-                    try:
-                        posts = self._get_vec().search(question, top_k=5)
-                    except Exception as e:
-                        logger.warning("Vector search failed: %s", e)
-                # Сидовые факты (group://) — подмешиваем тексты карточек (п.10).
-                # После вектора, с дедупом: карточка — baseline, а не дубль.
-                try:
-                    cards = self._cards_for_fact_sources(graph_facts)
-                    seen = {p.get("post_url") for p in posts}
-                    posts = [c for c in cards if c["post_url"] not in seen] + posts
-                except Exception as e:
-                    logger.warning("Group card resolve failed: %s", e)
-            else:
-                # П.9: граф молчит — не сдаёмся, вектор отдельным блоком.
-                # "Нет данных" разрешено, только если оба источника пусты.
-                try:
-                    posts = self._get_vec().search(question, top_k=5)
-                except Exception as e:
-                    logger.warning("Vector fallback failed: %s", e)
-            if mode == "struct":
-                # Период: из плана, иначе год из вопроса (п.8).
-                pstart = (plan or {}).get("period_start") or year_period[0]
-                pend = (plan or {}).get("period_end") or year_period[1]
-                if pstart or pend:
-                    source_posts = _filter_posts_by_period(source_posts, pstart, pend)
-                    posts = _filter_posts_by_period(posts, pstart, pend)
-                # units: полный состав из карточки по имени (факты из постов
-                # могут не ссылаться на group:// — это дополнение к общему правилу).
-                if plan and plan.get("intent") == "units":
-                    try:
-                        cards = self._group_card_posts(plan.get("org_filter"))
-                        seen = {p.get("post_url") for p in posts}
-                        posts = [c for c in cards if c["post_url"] not in seen] + posts
-                    except Exception as e:
-                        logger.warning("Group card injection failed: %s", e)
-
-        elif mode == "global":
-            communities = self._load_communities()
-            posts = []
-
-        else:  # basic
-            try:
-                posts = self._get_vec().search(question, top_k=top_k)
-            except Exception as e:
-                logger.warning("Vector search failed: %s", e)
-            if year_period[0] or year_period[1]:
-                posts = _filter_posts_by_period(posts, *year_period)
-
-        answer, blocks = self._get_answer_gen().generate(
-            question,
-            mode=mode,
-            graph_facts=graph_facts,
-            posts=posts,
-            source_posts=source_posts,
-            communities=communities,
-            trace_sink=answer_sink,
-        )
-
-        sources = self._collect_sources(mode, graph_facts, source_posts, posts)
-
-        if include_context:
-            planner_extra = ""
-            cypher = (plan_debug or {}).get("cypher")
-            if cypher:
-                planner_extra = (
-                    f"=== CYPHER ===\n{cypher}\n\n"
-                    f"=== ПАРАМЕТРЫ ===\n"
-                    f"{json.dumps((plan_debug or {}).get('params', {}), ensure_ascii=False, indent=2)}\n\n"
-                    f"=== СТРОКИ ГРАФА ===\n"
-                    f"{json.dumps((graph_facts or [])[:20], ensure_ascii=False, indent=2)}"
-                )
-            calls = [
-                {"title": "Вызов 1 — роутер", "text": _fmt_call_window(router_sink)},
-                {"title": "Вызов 2 — планировщик", "text": _fmt_call_window(planner_sink, planner_extra)},
-                {"title": "Вызов 3 — ответ", "text": _fmt_call_window(answer_sink)},
-            ]
-        else:
-            calls = None
-            trace = None
-
-        return {
-            "answer": answer,
-            "sources": sources,
-            "media": media,
-            "mode": mode,
-            "facts_count": len(graph_facts),
-            "posts_used": len(posts) + len(source_posts),
-            # Панель «Рентген»: три окна вызовов дословно. Только по запросу.
-            "context": blocks if include_context else None,
-            "trace": trace,
-            "calls": calls,
-        }
-
-    def _search_v2(
-        self, question: str, top_k: int = 8, include_context: bool = False
-    ) -> dict:
-        """Путь v2 (Фаза 4): единый classify+plan, диспетчер enumerable/narrative.
+        """Единый путь: classify+plan, диспетчер enumerable/narrative.
 
         enumerable + факты -> шаблон (0 LLM-вызовов на ответе);
         шаблон пуст -> vector-fallback -> LLM; оба пусты -> тишина без LLM.
         """
-        logger.info("GraphRAG search v2: '%s'", question)
+        logger.info("GraphRAG search: '%s'", question)
         plan_sink: list = []
         answer_sink: list = []
 
@@ -448,7 +286,7 @@ class GraphRAGSearcher:
             trace_sink=plan_sink,
         )
         mode = plan.mode
-        logger.info("v2 plan: intent=%s mode=%s kind=%s org=%s",
+        logger.info("plan: intent=%s mode=%s kind=%s org=%s",
                     plan.intent, mode, plan.kind, plan.org_norm_id)
 
         graph_facts: list = []

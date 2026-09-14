@@ -61,11 +61,6 @@ GIGACHAT_MODEL = os.getenv("GIGACHAT_MODEL", "GigaChat-2-Pro")
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "admin-secret-key-change-me")
 USER_API_KEY = os.getenv("USER_API_KEY", "user-secret-key-change-me")
 
-# Пайплайн вопрос-ответ: v1 (роутер+планировщик, 2 LLM-вызова) | v2
-# (единый classify+plan, детерминированные шаблоны, 0-1 вызов).
-# Откат на v1 одной переменной окружения.
-QUERY_PIPELINE_VERSION = os.getenv("QUERY_PIPELINE_VERSION", "v1")
-
 # Sessions (opaque Bearer-токены)
 SESSION_TTL = int(os.getenv("SESSION_TTL", "30"))  # суток
 # Фаза 0 (план упрощения пайплайна): ПрогрессLAB — аффилированная структура.

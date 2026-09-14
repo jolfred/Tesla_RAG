@@ -72,43 +72,41 @@ def test_fmt_facts_honest_dates():
     assert "[экс/бывший]" in s
 
 
-def _searcher(router_mode, plan, facts, qtexts=None, vec_posts=None):
+def _searcher(monkeypatch, mode, intent, rows, qtexts=None, vec_posts=None,
+              plan_extra=None):
+    """Мок единого пути: canned classify+plan + canned execute_v2."""
     from backend.rag import searcher as mod
+    from backend.rag.query_schemas import INTENT_TO_KIND, QueryPlan
 
+    plan = QueryPlan(
+        intent=intent or "general",
+        mode=mode,
+        kind=INTENT_TO_KIND.get(intent or "general", "narrative"),
+        org_filter=(plan_extra or {}).get("org_filter"),
+        org_norm_id=(plan_extra or {}).get("org_norm_id"),
+        llm_calls=1,
+    )
+
+    def _fake_classify(q, graph=None, trace_sink=None):
+        # Мок пишет canned-обмен в sink — как настоящий classify через trace_sink.
+        if trace_sink is not None:
+            trace_sink.append(
+                {
+                    "messages": [
+                        {"role": "system", "content": "PLAN_PROMPT"},
+                        {"role": "user", "content": q},
+                    ],
+                    "response": '{"intent": "%s"}' % plan.intent,
+                }
+            )
+        return plan
+
+    monkeypatch.setattr(mod.query_planner, "classify_and_plan", _fake_classify)
     s = mod.GraphRAGSearcher()
-    s._router = MagicMock()
-    # Мок пишет canned-обмен в sink — как настоящий роутер через trace_sink.
-    s._router.route.side_effect = lambda q, trace_sink=None: (
-        trace_sink.append(
-            {
-                "messages": [
-                    {"role": "system", "content": "ROUTER_PROMPT"},
-                    {"role": "user", "content": q},
-                ],
-                "response": '{"mode": "%s"}' % router_mode,
-            }
-        )
-        if trace_sink is not None
-        else None,
-        router_mode,
-    )[1]
     planner = MagicMock()
-    planner.plan.side_effect = lambda q, trace_sink=None: (
-        trace_sink.append(
-            {
-                "messages": [
-                    {"role": "system", "content": "PLANNER_PROMPT"},
-                    {"role": "user", "content": q},
-                ],
-                "response": '{"intent": "%s"}' % (plan.get("intent") if plan else None),
-            }
-        )
-        if trace_sink is not None
-        else None,
-        plan,
-    )[1]
-    planner.execute.return_value = (facts, {"cypher": "MOCK CYPHER", "params": {}})
-    planner.resolve_org_exact.return_value = None
+    planner._get_graph.return_value = MagicMock()
+    planner.execute_v2.return_value = (
+        rows, {"cypher": "MOCK CYPHER", "params": {}})
     s._planner = planner
     vec = MagicMock()
     vec.search.return_value = vec_posts or []
@@ -134,45 +132,41 @@ def _searcher(router_mode, plan, facts, qtexts=None, vec_posts=None):
     return s, planner, vec, gen
 
 
-def test_struct_uses_source_posts_no_vector():
+def test_struct_uses_source_posts_no_vector(monkeypatch):
     url = "https://vk.com/rso_tesla?w=wall-1_1"
     facts = [{"person": "Иван", "relation": "COMMANDED",
               "source_post_url": url, "observed_at": "2026-03-01"}]
     s, planner, vec, gen = _searcher(
-        "struct",
-        {"intent": "commanders", "org_filter": None, "period_start": None,
-         "period_end": None},
-        facts,
+        monkeypatch, "struct", "commanders", facts,
         qtexts={url: ("Текст поста про Ивана", "2026-03-01", "Тесла")},
     )
     out = s.search("кто командует")
-    vec.search.assert_not_called()  # ТЕСТ п.11: вектора в struct нет
-    kwargs = gen.generate.call_args[1]
-    assert len(kwargs["source_posts"]) == 1
-    assert kwargs["source_posts"][0]["text"] == "Текст поста про Ивана"
-    assert kwargs["posts"] == []
+    vec.search.assert_not_called()  # вектора в struct с фактами нет
+    gen.generate.assert_not_called()  # ответ — шаблон, 0 LLM
+    assert out["answer"] == (
+        "Командный состав «архив»:\n"
+        "• Иван — должность не указана (упоминание от 2026-03-01)"
+    )
     assert out["posts_used"] == 1
+    assert out["llm_calls"] == 1
 
 
-def test_struct_empty_graph_falls_back_to_vector():
+def test_struct_empty_graph_falls_back_to_vector(monkeypatch):
     s, planner, vec, gen = _searcher(
-        "struct",
-        {"intent": "commanders", "org_filter": None, "period_start": None,
-         "period_end": None},
-        [],
+        monkeypatch, "struct", "commanders", [],
         vec_posts=[{"post_url": "u", "text": "t", "group_name": "g",
                     "published_at": "2026-01-01"}],
     )
     s.search("кто командует")
-    vec.search.assert_called_once()  # п.9: граф пуст -> вектор
+    vec.search.assert_called_once()  # граф пуст -> вектор
     kwargs = gen.generate.call_args[1]
     assert kwargs["source_posts"] == []
     assert len(kwargs["posts"]) == 1
 
 
-def test_basic_year_filter():
+def test_basic_year_filter(monkeypatch):
     s, planner, vec, gen = _searcher(
-        "basic", {}, [],
+        monkeypatch, "basic", "general", [],
         vec_posts=[
             {"post_url": "old", "text": "t", "group_name": "g",
              "published_at": "2023-04-24"},
@@ -262,10 +256,10 @@ def test_generate_returns_answer_and_blocks():
     assert len(stub.seen) == 2
 
 
-def test_search_context_flag():
+def test_search_context_flag(monkeypatch):
     # include_context=False (по умолчанию) — окон нет, ответ не раздут.
     s, planner, vec, gen = _searcher(
-        "basic", {}, [],
+        monkeypatch, "basic", "general", [],
         vec_posts=[{"post_url": "u", "text": "t", "group_name": "g",
                     "published_at": "2026-01-01"}],
     )
@@ -274,32 +268,31 @@ def test_search_context_flag():
     assert out["calls"] is None
     out2 = s.search("привет", include_context=True)
     assert [c["title"] for c in out2["calls"]] == [
-        "Вызов 1 — роутер",
-        "Вызов 2 — планировщик",
-        "Вызов 3 — ответ",
+        "Вызов 1 — план (v2)",
+        "Вызов 2 — ответ",
     ]
-    # basic: планировщик не вызывался — окно честно пустое.
-    assert "вызовов не было" in out2["calls"][1]["text"]
+    # basic: граф не трогали — в окне плана только сам план.
+    assert "MOCK CYPHER" not in out2["calls"][0]["text"]
+    assert '{"intent": "general"}' in out2["calls"][0]["text"]
 
 
-def test_search_trace_struct():
-    # Окна struct: план + cypher + сырые строки графа в окне планировщика.
+def test_search_trace_struct(monkeypatch):
+    # Окна struct: план + cypher + сырые строки графа в окне плана.
     facts = [{"person": "Иван", "relation": "COMMANDED",
               "source_post_url": "https://vk.com/x",
               "observed_at": "2026-03-01"}]
     s, planner, vec, gen = _searcher(
-        "struct",
-        {"intent": "commanders", "org_filter": None, "period_start": None,
-         "period_end": None},
-        facts,
+        monkeypatch, "struct", "commanders", facts,
     )
     gen._blocks_override = {"graph": "=== ФАКТЫ ===\n..."}
     out = s.search("кто командует", include_context=True)
     by_title = {c["title"]: c["text"] for c in out["calls"]}
-    assert "MOCK CYPHER" in by_title["Вызов 2 — планировщик"]
-    assert "Иван" in by_title["Вызов 2 — планировщик"]  # строки графа
-    assert "=== SYSTEM ===" in by_title["Вызов 1 — роутер"]
-    assert "=== ОТВЕТ ===" in by_title["Вызов 3 — ответ"]
+    assert "MOCK CYPHER" in by_title["Вызов 1 — план (v2)"]
+    assert "Иван" in by_title["Вызов 1 — план (v2)"]  # строки графа
+    assert "=== SYSTEM ===" in by_title["Вызов 1 — план (v2)"]
+    # Ответ — шаблон: LLM не вызывалась, окно честно говорит об этом.
+    assert "=== ШАБЛОН ===" in by_title["Вызов 2 — ответ"]
+    gen.generate.assert_not_called()
 
 
 def test_cards_for_fact_sources():

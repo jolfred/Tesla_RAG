@@ -180,3 +180,68 @@ def test_regression_commanders_tesla_without_progresslab(monkeypatch, tmp_path):
     names = [r["person"] for r in rows]
     assert "Виталий Петров" not in names
     assert set(names) == {"Даниил Астафьев", "Альфред Шарифуллин"}
+
+
+def _payload(intent, **kw):
+    base = {"intent": intent, "org_filter": None, "target_name": None,
+            "event_name": None, "period_start": None, "period_end": None,
+            "relation": None, "limit": 20}
+    base.update(kw)
+    return base
+
+
+# Golden-набор Фазы 6: вопрос -> intent+slots -> точный текст шаблона.
+GOLDEN = [
+    (_payload("units", org_filter="Тесла"),
+     [{"unit": "Монолит"}],
+     ("units", "struct", "enumerable"), "Отряды «Тесла»:"),
+    (_payload("commanders", org_filter="Тесла"),
+     [{"person": "Даниил Астафьев", "role_title": "Руководитель",
+       "relation": "COMMANDED"}],
+     ("commanders", "struct", "enumerable"), "Командный состав «Тесла»:"),
+    (_payload("members", org_filter="Монолит"),
+     [{"person": "Боец"}],
+     ("members", "struct", "enumerable"), "Участники «Монолит»:"),
+    (_payload("winners", org_filter="Тесла"),
+     [{"person": "X", "award": "Гран-при", "relation": "WON_AWARD"}],
+     ("winners", "struct", "enumerable"), "Награды «Тесла»:"),
+    (_payload("partners", org_filter="Тесла"),
+     [{"subject": "Штаб", "partner": "Ак Барс Банк"}],
+     ("partners", "struct", "enumerable"), "Партнёры «Тесла»:"),
+    (_payload("projects", org_filter="Тесла"),
+     [{"project": "Снежный десант"}],
+     ("projects", "struct", "enumerable"), "Проекты «Тесла»:"),
+    (_payload("locations"),
+     [{"location": "Казань"}],
+     ("locations", "struct", "enumerable"), "Локации «архив»:"),
+    (_payload("events_in_period", period_start="2026-01-01",
+              period_end="2026-03-31"),
+     [{"event": "Погружение"}],
+     ("events_in_period", "struct", "enumerable"), "Мероприятия «архив»:"),
+]
+
+
+@pytest.mark.parametrize("payload,rows,expected,head", GOLDEN)
+def test_golden_intent_and_template(monkeypatch, tmp_path, payload, rows,
+                                    expected, head):
+    from backend.rag.renderers import render
+
+    monkeypatch.setattr(qp.quality_log, "_LOG_PATH", tmp_path / "q.jsonl")
+    plan = qp.classify_and_plan(
+        "вопрос", graph=FakeGraph(CANDS), llm=FakeLLM(payload))
+    assert (plan.intent, plan.mode, plan.kind) == expected
+    text = render(plan.intent, rows, plan.org_filter or "архив")
+    assert text.startswith(head)
+
+
+def test_golden_narrative_intents(monkeypatch, tmp_path):
+    monkeypatch.setattr(qp.quality_log, "_LOG_PATH", tmp_path / "q.jsonl")
+    g = FakeGraph(CANDS)
+    ed = qp.classify_and_plan(
+        "кто такой", graph=g,
+        llm=FakeLLM(_payload("entity_detail", target_name="Астафьев")))
+    assert (ed.intent, ed.mode, ed.kind) == (
+        "entity_detail", "local", "narrative")
+    assert ed.target_name == "Астафьев"
+    gen = qp.classify_and_plan("расскажи", graph=g, llm=FakeLLM(_payload("general")))
+    assert (gen.intent, gen.mode, gen.kind) == ("general", "basic", "narrative")
