@@ -77,20 +77,25 @@ class GraphPlanner:
             return None
         return rows[0]["n"] if rows else None
 
-    def execute(self, plan: dict) -> list[dict]:
+    def execute(self, plan: dict) -> tuple[list[dict], dict]:
+        """Выполнение плана. Возвращает (строки, debug).
+
+        debug = {"cypher": str|None, "params": dict} — для панели «Рентген»:
+        видно, какой запрос к графу построил планировщик.
+        """
         graph = self._get_graph()
         if graph is None:
-            return []
+            return [], {"cypher": None, "params": {}}
 
         candidate = query_for_plan(plan)
         if candidate is None:
-            return []
+            return [], {"cypher": None, "params": {}}
         query, params = candidate
         try:
-            return graph.search_cypher(query, params)
+            return graph.search_cypher(query, params), {"cypher": query, "params": params}
         except Exception as e:
             logger.warning("Graph planner query failed: %s", e)
-            return []
+            return [], {"cypher": query, "params": params}
 
     def close(self):
         if self._graph is not None:

@@ -46,6 +46,15 @@ const CHAT_WITH_CTX = {
     posts: null,
     communities: null,
   },
+  trace: {
+    router: { mode: 'struct' },
+    planner: {
+      plan: { intent: 'commanders', org_filter: 'Тесла' },
+      cypher: 'MATCH (p:Person) RETURN p',
+      params: { org: 'Тесла' },
+    },
+    graph_rows: [{ person: 'Иван' }],
+  },
 }
 
 async function askQuestion() {
@@ -86,7 +95,7 @@ describe('ChatPage рентген-панель', () => {
     })
   }
 
-  it('админ: 4 окна с контекстом дословно, пустые — «— пусто —»', async () => {
+  it('админ: окна контекста и трейса дословно, пустые — «— пусто —»', async () => {
     authed({
       '/api/v1/auth/guest': jsonResponse(ADMIN_GUEST),
       '/api/v1/chat': jsonResponse(CHAT_WITH_CTX),
@@ -99,14 +108,19 @@ describe('ChatPage рентген-панель', () => {
     await askQuestion()
     expect(screen.getByText('Рентген: что получила модель')).toBeTruthy()
     expect(screen.getByText('0. Ответ модели')).toBeTruthy()
-    expect(screen.getByText('1. Факты графа')).toBeTruthy()
-    expect(screen.getByText('2. Посты-источники')).toBeTruthy()
-    expect(screen.getByText('3. Посты и карточки')).toBeTruthy()
-    // pretty-print: переносы строк сохранены, не одной строкой
+    expect(screen.getByText('1. Маршрут (выбор режима)')).toBeTruthy()
+    expect(screen.getByText('2. План и запрос к графу')).toBeTruthy()
+    expect(screen.getByText('3. Выход графа (сырые строки)')).toBeTruthy()
+    expect(screen.getByText('4. Факты графа (в модель)')).toBeTruthy()
+    // pretty-print: переносы строк и отступы сохранены, не одной строкой
     const pres = document.querySelectorAll('pre')
-    expect(pres.length).toBeGreaterThanOrEqual(4)
-    expect(pres[1].textContent).toContain('=== ФАКТЫ ===\n- Иван (командир)')
-    expect(pres[3].textContent).toBe('— пусто —')
+    expect(pres.length).toBeGreaterThanOrEqual(7)
+    const all = [...pres].map((p) => p.textContent ?? '').join('\n')
+    expect(all).toContain('режим поиска: struct')
+    expect(all).toContain('"intent": "commanders"')
+    expect(all).toContain('MATCH (p:Person) RETURN p')
+    expect(all).toContain('=== ФАКТЫ ===\n- Иван (командир)')
+    expect(all).toContain('— пусто —')
   })
 
   it('не-админ: тумблера и панели нет', async () => {

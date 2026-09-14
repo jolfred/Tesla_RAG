@@ -51,6 +51,18 @@ export interface ContextBlocks {
   communities?: string | null
 }
 
+export interface TracePlanner {
+  plan: Record<string, unknown>
+  cypher: string | null
+  params: Record<string, unknown>
+}
+
+export interface TraceInfo {
+  router: { mode: ChatMode }
+  planner: TracePlanner | null
+  graph_rows: Record<string, unknown>[]
+}
+
 export interface ChatResponse {
   answer: string
   sources: SourceInfo[]
@@ -59,6 +71,7 @@ export interface ChatResponse {
   facts_count: number
   posts_used: number
   context?: ContextBlocks | null
+  trace?: TraceInfo | null
 }
 
 // --- Status (FR-4.x) ---

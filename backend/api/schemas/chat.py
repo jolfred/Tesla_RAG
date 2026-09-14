@@ -22,6 +22,14 @@ class ContextBlocks(BaseModel):
     communities: str | None = None
 
 
+class TraceInfo(BaseModel):
+    """Трейс конвейера для панели «Рентген» (только admin, только по запросу)."""
+
+    router: dict = {}
+    planner: dict | None = None
+    graph_rows: list[dict] = []
+
+
 class ChatResponse(BaseModel):
     answer: str
     sources: list[SourceInfo] = []
@@ -30,3 +38,4 @@ class ChatResponse(BaseModel):
     facts_count: int = 0
     posts_used: int = 0
     context: ContextBlocks | None = None
+    trace: TraceInfo | None = None

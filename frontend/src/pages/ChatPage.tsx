@@ -4,7 +4,7 @@ import { Badge, Button, Div, FormItem, Group, Link, SimpleCell, Spinner, Textare
 
 import { api } from '../api/client'
 import { useAuth } from '../auth/authContext'
-import type { ChatMode, ChatResponse, ContextBlocks } from '../types'
+import type { ChatMode, ChatResponse, ContextBlocks, TraceInfo } from '../types'
 
 type Entry =
   | { kind: 'q'; text: string }
@@ -20,9 +20,9 @@ const MODE_LABELS: Record<ChatMode, string> = {
 
 // Панель «Рентген»: окна в фиксированном порядке (только для admin).
 const CTX_WINDOWS: { key: keyof ContextBlocks; title: string }[] = [
-  { key: 'graph', title: '1. Факты графа' },
-  { key: 'source_posts', title: '2. Посты-источники' },
-  { key: 'posts', title: '3. Посты и карточки' },
+  { key: 'graph', title: '4. Факты графа (в модель)' },
+  { key: 'source_posts', title: '5. Посты-источники' },
+  { key: 'posts', title: '6. Посты и карточки' },
 ]
 
 function CtxWindow({ title, text }: { title: string; text: string | null | undefined }): React.JSX.Element {
@@ -88,7 +88,19 @@ export default function ChatPage(): React.JSX.Element {
   const lastAnswer = [...entries].reverse().find((e) => e.kind === 'a')
   const ctx: ContextBlocks | null | undefined =
     lastAnswer && lastAnswer.kind === 'a' ? lastAnswer.data.context : undefined
+  const trace: TraceInfo | null | undefined =
+    lastAnswer && lastAnswer.kind === 'a' ? lastAnswer.data.trace : undefined
   const showPanel = isAdmin && showCtx
+
+  const pretty = (v: unknown): string => JSON.stringify(v, null, 2)
+  // Окна трейса: как модель выбирала режим, какой запрос написала к графу,
+  // что граф вернул. Всё с отступами, не одной строкой.
+  const routerText = trace ? `режим поиска: ${trace.router.mode}` : undefined
+  const plannerText = trace?.planner
+    ? `ПЛАН:\n${pretty(trace.planner.plan)}\n\nCYPHER:\n${trace.planner.cypher ?? '—'}\n\nПАРАМЕТРЫ:\n${pretty(trace.planner.params)}`
+    : undefined
+  const rowsText =
+    trace && trace.graph_rows.length > 0 ? pretty(trace.graph_rows) : undefined
 
   return (
     <Group>
@@ -187,6 +199,9 @@ export default function ChatPage(): React.JSX.Element {
                 Рентген: что получила модель
               </div>
               <CtxWindow title="0. Ответ модели" text={lastAnswer && lastAnswer.kind === 'a' ? lastAnswer.data.answer : undefined} />
+              <CtxWindow title="1. Маршрут (выбор режима)" text={routerText} />
+              <CtxWindow title="2. План и запрос к графу" text={plannerText} />
+              <CtxWindow title="3. Выход графа (сырые строки)" text={rowsText} />
               {CTX_WINDOWS.map((w) => (
                 <CtxWindow key={w.key} title={w.title} text={ctx?.[w.key]} />
               ))}

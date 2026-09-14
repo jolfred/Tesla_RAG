@@ -247,6 +247,9 @@ class GraphRAGSearcher:
         year = question_year(question)
         year_period = (f"{year}-01-01", f"{year}-12-31") if year else (None, None)
 
+        # Трейс конвейера для панели «Рентген» (только по запросу).
+        trace: dict = {"router": {"mode": mode}, "planner": None}
+
         if mode in ("struct", "local"):
             plan = None
             try:
@@ -255,7 +258,12 @@ class GraphRAGSearcher:
                 plan["org_exact"] = self._get_planner().resolve_org_exact(
                     plan.get("org_filter")
                 )
-                graph_facts = self._get_planner().execute(plan)
+                graph_facts, plan_debug = self._get_planner().execute(plan)
+                trace["planner"] = {
+                    "plan": plan,
+                    "cypher": plan_debug.get("cypher"),
+                    "params": plan_debug.get("params", {}),
+                }
             except Exception as e:
                 logger.warning("Planner execution failed: %s", e)
             # Temporal-приоритет (п.10): свежие факты первыми.
@@ -351,6 +359,16 @@ class GraphRAGSearcher:
                 if src not in sources:
                     sources.append(src)
 
+        if include_context:
+            # Сырой выход графа (первые 20 строк) — окно «Рентгена».
+            trace["graph_rows"] = [
+                {k: (str(v)[:300] if not isinstance(v, (str, int, float, bool, type(None))) else v)
+                 for k, v in row.items()}
+                for row in (graph_facts or [])[:20]
+            ]
+        else:
+            trace = None
+
         return {
             "answer": answer,
             "sources": sources,
@@ -358,9 +376,10 @@ class GraphRAGSearcher:
             "mode": mode,
             "facts_count": len(graph_facts),
             "posts_used": len(posts) + len(source_posts),
-            # Панель «Рентген»: секции дословно как ушли в LLM. Только по запросу,
-            # чтобы не раздувать обычные ответы.
+            # Панель «Рентген»: секции дословно как ушли в LLM + трейс
+            # конвейера. Только по запросу, чтобы не раздувать обычные ответы.
             "context": blocks if include_context else None,
+            "trace": trace,
         }
 
     def close(self):

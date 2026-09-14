@@ -80,7 +80,7 @@ def _searcher(router_mode, plan, facts, qtexts=None, vec_posts=None):
     s._router.route.return_value = router_mode
     planner = MagicMock()
     planner.plan.return_value = plan
-    planner.execute.return_value = facts
+    planner.execute.return_value = (facts, {"cypher": "MOCK CYPHER", "params": {}})
     planner.resolve_org_exact.return_value = None
     s._planner = planner
     vec = MagicMock()
@@ -222,8 +222,32 @@ def test_search_context_flag():
     gen.generate.return_value = ("ответ", {"posts": "=== ПОСТЫ ===\n..."})
     out = s.search("привет")
     assert out["context"] is None
+    assert out["trace"] is None
     out2 = s.search("привет", include_context=True)
     assert out2["context"] == {"posts": "=== ПОСТЫ ===\n..."}
+    assert out2["trace"]["router"] == {"mode": "basic"}
+    assert out2["trace"]["planner"] is None  # basic планировщик не вызывает
+    assert out2["trace"]["graph_rows"] == []
+
+
+def test_search_trace_struct():
+    # Трейс struct: план + cypher + сырые строки графа.
+    facts = [{"person": "Иван", "relation": "COMMANDED",
+              "source_post_url": "https://vk.com/x",
+              "observed_at": "2026-03-01"}]
+    s, planner, vec, gen = _searcher(
+        "struct",
+        {"intent": "commanders", "org_filter": None, "period_start": None,
+         "period_end": None},
+        facts,
+    )
+    gen.generate.return_value = ("ответ", {"graph": "=== ФАКТЫ ===\n..."})
+    out = s.search("кто командует", include_context=True)
+    tr = out["trace"]
+    assert tr["router"] == {"mode": "struct"}
+    assert tr["planner"]["cypher"] == "MOCK CYPHER"
+    assert tr["planner"]["plan"]["intent"] == "commanders"
+    assert tr["graph_rows"][0]["person"] == "Иван"
 
 
 def test_cards_for_fact_sources():

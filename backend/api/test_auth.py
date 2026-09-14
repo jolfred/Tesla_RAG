@@ -52,6 +52,13 @@ class FakeSearcher:
             "facts_count": 1,
             "posts_used": 2,
             "context": {"graph": "=== ФАКТЫ ===\n- тест"} if include_context else None,
+            "trace": {
+                "router": {"mode": "local"},
+                "planner": {"plan": {"intent": "entity_detail"}, "cypher": "MOCK", "params": {}},
+                "graph_rows": [{"id": "тест"}],
+            }
+            if include_context
+            else None,
         }
 
 
@@ -165,6 +172,8 @@ def test_chat_context_admin_only(mock_searcher):
     )
     assert resp.status_code == 200
     assert resp.json()["context"]["graph"] == "=== ФАКТЫ ===\n- тест"
+    assert resp.json()["trace"]["router"] == {"mode": "local"}
+    assert resp.json()["trace"]["planner"]["cypher"] == "MOCK"
     # X-API-Key user + флаг -> контекста нет.
     resp = client.post(
         "/api/v1/chat",
