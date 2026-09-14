@@ -494,6 +494,15 @@ class GraphRAGSearcher:
                 if pstart or pend:
                     source_posts = _filter_posts_by_period(source_posts, pstart, pend)
                     posts = _filter_posts_by_period(posts, pstart, pend)
+                # units: полный состав из карточки по имени (паритет с v1 —
+                # без неё LLM-ответ перечисляет 2 отряда вместо всех).
+                if plan.intent == "units":
+                    try:
+                        cards = self._group_card_posts(plan.org_filter)
+                        seen = {p.get("post_url") for p in posts}
+                        posts = [c for c in cards if c["post_url"] not in seen] + posts
+                    except Exception as e:
+                        logger.warning("Group card injection failed: %s", e)
         elif mode == "global":
             communities = self._load_communities()
         else:  # basic
@@ -506,7 +515,7 @@ class GraphRAGSearcher:
 
         rendered = None
         if plan.kind == "enumerable" and mode == "struct" and graph_facts:
-            org_name = plan.org_filter or plan.org_norm_id or "?"
+            org_name = plan.org_filter or plan.org_norm_id or "архив"
             rendered = render(plan.intent, graph_facts, org_name)
 
         answer_sink_note = ""

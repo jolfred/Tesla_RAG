@@ -51,12 +51,15 @@ class FakeGraph:
         return list(self.rows)
 
 
+# Живая топология (проверено 2026-09-14): org_type пуст у всех узлов,
+# штаб опознаётся по HQ_NORM_ID, узлы несут по несколько меток.
 CANDS = [
-    {"norm_id": "тесла", "name": "Студенческий отряд «Тесла»", "org_type": "lso"},
-    {"norm_id": HQ_NORM, "name": "Штаб СО КГЭУ «Тесла»", "org_type": "hq"},
+    {"norm_id": "тесла", "name": "Тесла", "org_type": None},
+    {"norm_id": HQ_NORM, "name": "Студенческие отряды КГЭУ «Тесла» | РСО",
+     "org_type": None},
     {"norm_id": "проектный центр штаба со тесла - прогрессlab",
      "name": "Проектный центр Штаба СО «Тесла» - «ПрогрессLAB»",
-     "org_type": "external"},
+     "org_type": None},
 ]
 
 COMMANDERS_PAYLOAD = {
@@ -69,6 +72,12 @@ COMMANDERS_PAYLOAD = {
 def test_resolve_prefers_hq_for_generic_alias():
     g = FakeGraph(CANDS)
     assert qp.resolve_org_norm_id("Тесла", g) == HQ_NORM
+
+
+def test_resolve_hq_without_org_type_beats_exact_squad():
+    """Кейс живого графа: exact-norm 'тесла' = отряд, HQ без org_type."""
+    g = FakeGraph(CANDS)
+    assert qp.resolve_org_norm_id("штаб Тесла", g) == HQ_NORM
 
 
 def test_resolve_exact_squad():

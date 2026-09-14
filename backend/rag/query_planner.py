@@ -82,8 +82,12 @@ PLAN_SCHEMA = {
     ],
 }
 
-# Generic-алиасы штаба: вопрос "про Теслу" = вопрос про штаб (org_type=hq),
-# а не про узел, у которого norm_id случайно равен "тесла" (кейс D: Squad).
+# Канонический ключ штаба (target canon.SYNONYMS): узел с этим norm_id —
+# штаб, даже если у него нет org_type='hq' (в живых данных org_type пуст,
+# а generic-алиас 'тесла' точно совпадает с norm_id отряда СПО «Тесла»).
+HQ_NORM_ID = "штаб со кгэу тесла"
+
+# Generic-алиасы штаба: вопрос "про Теслу" = вопрос про штаб.
 # Маппинг НЕ кладём в canon.SYNONYMS: там он повлиял бы на MERGE-ключи
 # индексатора (отряд СПО «Тесла» склеился бы со штабом). Правило живёт
 # только здесь, на чтение.
@@ -125,11 +129,16 @@ def resolve_org_norm_id(org_filter: str | None, graph) -> str | None:
 
     def _rank(c: dict) -> tuple:
         exact = c.get("norm_id") == norm
-        full = norm in normalize_id(c.get("name") or "")
-        hq = (c.get("org_type") or "") == "hq"
+        name_norm = normalize_id(c.get("name") or "")
+        full = norm in name_norm
+        # Токены имени целиком внутри фильтра («отряд Монолит» -> «Монолит»).
+        subset = bool(name_norm) and set(name_norm.split()) <= set(norm.split())
+        hq = (c.get("org_type") or "") == "hq" or c.get("norm_id") == HQ_NORM_ID
         if prefer_hq:
-            return (not hq, not exact, not full, len(c.get("name") or ""))
-        return (not exact, not full, not hq, len(c.get("name") or ""))
+            return (not hq, not exact, not full, not subset,
+                    len(c.get("name") or ""))
+        return (not exact, not full, not subset, not hq,
+                len(c.get("name") or ""))
 
     cands.sort(key=_rank)
     return cands[0]["norm_id"]
