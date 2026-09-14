@@ -40,21 +40,11 @@ const CHAT_WITH_CTX = {
   mode: 'struct',
   facts_count: 1,
   posts_used: 1,
-  context: {
-    graph: '=== ФАКТЫ ===\n- Иван (командир)',
-    source_posts: '=== ИСТОЧНИКИ ===\n- текст поста',
-    posts: null,
-    communities: null,
-  },
-  trace: {
-    router: { mode: 'struct' },
-    planner: {
-      plan: { intent: 'commanders', org_filter: 'Тесла' },
-      cypher: 'MATCH (p:Person) RETURN p',
-      params: { org: 'Тесла' },
-    },
-    graph_rows: [{ person: 'Иван' }],
-  },
+  calls: [
+    { title: 'Вызов 1 — роутер', text: '=== SYSTEM ===\nроутер\n\n=== ОТВЕТ ===\n{"mode": "struct"}' },
+    { title: 'Вызов 2 — планировщик', text: '=== SYSTEM ===\nплан\n\n=== CYPHER ===\nMATCH (p) RETURN p' },
+    { title: 'Вызов 3 — ответ', text: '=== SYSTEM ===\nхранитель\n\n=== ОТВЕТ ===\nОтвет модели' },
+  ],
 }
 
 async function askQuestion() {
@@ -95,7 +85,7 @@ describe('ChatPage рентген-панель', () => {
     })
   }
 
-  it('админ: окна контекста и трейса дословно, пустые — «— пусто —»', async () => {
+  it('админ: 3 окна вызовов с полными текстами', async () => {
     authed({
       '/api/v1/auth/guest': jsonResponse(ADMIN_GUEST),
       '/api/v1/chat': jsonResponse(CHAT_WITH_CTX),
@@ -106,21 +96,18 @@ describe('ChatPage рентген-панель', () => {
       </AuthProvider>,
     )
     await askQuestion()
-    expect(screen.getByText('Рентген: что получила модель')).toBeTruthy()
-    expect(screen.getByText('0. Ответ модели')).toBeTruthy()
-    expect(screen.getByText('1. Маршрут (выбор режима)')).toBeTruthy()
-    expect(screen.getByText('2. План и запрос к графу')).toBeTruthy()
-    expect(screen.getByText('3. Выход графа (сырые строки)')).toBeTruthy()
-    expect(screen.getByText('4. Факты графа (в модель)')).toBeTruthy()
-    // pretty-print: переносы строк и отступы сохранены, не одной строкой
+    expect(screen.getByText('Рентген: вызовы модели')).toBeTruthy()
+    expect(screen.getByText('Вызов 1 — роутер')).toBeTruthy()
+    expect(screen.getByText('Вызов 2 — планировщик')).toBeTruthy()
+    expect(screen.getByText('Вызов 3 — ответ')).toBeTruthy()
+    // полные тексты с переносами, не одной строкой
     const pres = document.querySelectorAll('pre')
-    expect(pres.length).toBeGreaterThanOrEqual(7)
+    expect(pres.length).toBe(3)
     const all = [...pres].map((p) => p.textContent ?? '').join('\n')
-    expect(all).toContain('режим поиска: struct')
-    expect(all).toContain('"intent": "commanders"')
-    expect(all).toContain('MATCH (p:Person) RETURN p')
-    expect(all).toContain('=== ФАКТЫ ===\n- Иван (командир)')
-    expect(all).toContain('— пусто —')
+    expect(all).toContain('=== SYSTEM ===\nроутер')
+    expect(all).toContain('{"mode": "struct"}')
+    expect(all).toContain('MATCH (p) RETURN p')
+    expect(all).toContain('=== ОТВЕТ ===\nОтвет модели')
   })
 
   it('не-админ: тумблера и панели нет', async () => {
@@ -150,7 +137,7 @@ describe('ChatPage рентген-панель', () => {
     )
     await askQuestion()
     fireEvent.click(screen.getByRole('button', { name: /Рентген/ }))
-    expect(screen.queryByText('Рентген: что получила модель')).toBeNull()
+    expect(screen.queryByText('Рентген: вызовы модели')).toBeNull()
     const chatCalls = fetchMock.mock.calls.filter((c) => String(c[0]) === '/api/v1/chat')
     expect(chatCalls.length).toBeGreaterThan(0)
   })

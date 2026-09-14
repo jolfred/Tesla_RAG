@@ -119,6 +119,10 @@ class GigaChatClient:
         return [m.model_dump() for m in data.data]
 
     def chat(self, messages: list[dict], **kwargs) -> str:
+        # trace_sink (панель «Рентген»): список, куда дописывается полный обмен
+        # {"messages": [...], "response": str} каждого вызова. Локальный список
+        # вызывающей стороны — параллельные запросы не перемешиваются.
+        trace_sink = kwargs.pop("trace_sink", None)
         client = self._get_client()
         model = kwargs.pop("model", None) or self._model
         response = client.chat.completions.create(
@@ -129,7 +133,15 @@ class GigaChatClient:
             **kwargs,
         )
         content = response.choices[0].message.content
-        return (content or "").strip()
+        result = (content or "").strip()
+        if trace_sink is not None:
+            trace_sink.append(
+                {
+                    "messages": [dict(m) for m in messages],
+                    "response": result,
+                }
+            )
+        return result
 
     def extract_json(
         self,
@@ -138,6 +150,7 @@ class GigaChatClient:
         schema: dict | None = None,
         model: str | None = None,
         max_retries: int = 2,
+        trace_sink: list | None = None,
     ) -> dict:
         response_format = {
             "type": "json_schema",
@@ -154,6 +167,7 @@ class GigaChatClient:
                     ],
                     model=model,
                     response_format=response_format,
+                    trace_sink=trace_sink,
                 )
                 match = _JSON_OBJECT_RE.search(raw)
                 if not match:

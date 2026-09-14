@@ -18,6 +18,23 @@ STRUCT_USE_VECTOR = False
 _YEAR_RE = re.compile(r"(?:19|20)\d{2}")
 
 
+def _fmt_call_window(exchanges: list[dict], extra: str = "") -> str:
+    """Одно окно вызова: полные тексты запроса и ответа (fidelity).
+
+    Ретраи складываются стопкой с заголовками попыток. Ничего не режется.
+    """
+    parts = []
+    for i, ex in enumerate(exchanges):
+        if len(exchanges) > 1:
+            parts.append(f"--- попытка {i + 1} ---")
+        for m in ex.get("messages") or []:
+            parts.append(f"=== {str(m.get('role', '')).upper()} ===\n{m.get('content', '')}")
+        parts.append(f"=== ОТВЕТ ===\n{ex.get('response', '')}")
+    if extra:
+        parts.append(extra)
+    return "\n\n".join(parts) if parts else "— вызовов не было —"
+
+
 def question_year(question: str) -> str | None:
     """Единственный год из вопроса (п.8) — для фильтра на всех путях."""
     years = sorted(set(_YEAR_RE.findall(question or "")))
@@ -233,7 +250,13 @@ class GraphRAGSearcher:
     def search(self, question: str, top_k: int = 8, include_context: bool = False) -> dict:
         logger.info("GraphRAG search: '%s'", question)
 
-        mode = self._get_router().route(question)
+        # Sink'и полных обменов с LLM (панель «Рентген»): по одному списку
+        # на вызов, живут в локалях — параллельные запросы не перемешиваются.
+        router_sink: list = []
+        planner_sink: list = []
+        answer_sink: list = []
+
+        mode = self._get_router().route(question, trace_sink=router_sink)
         logger.info("Question mode: %s", mode)
 
         graph_facts = []
@@ -249,11 +272,12 @@ class GraphRAGSearcher:
 
         # Трейс конвейера для панели «Рентген» (только по запросу).
         trace: dict = {"router": {"mode": mode}, "planner": None}
+        plan_debug: dict = {}
 
         if mode in ("struct", "local"):
             plan = None
             try:
-                plan = self._get_planner().plan(question)
+                plan = self._get_planner().plan(question, trace_sink=planner_sink)
                 # Точная резолюция организации (C4) до выполнения запроса.
                 plan["org_exact"] = self._get_planner().resolve_org_exact(
                     plan.get("org_filter")
@@ -331,6 +355,7 @@ class GraphRAGSearcher:
             posts=posts,
             source_posts=source_posts,
             communities=communities,
+            trace_sink=answer_sink,
         )
 
         # источники: сначала URL из фактов графа (релевантны периоду),
@@ -360,13 +385,23 @@ class GraphRAGSearcher:
                     sources.append(src)
 
         if include_context:
-            # Сырой выход графа (первые 20 строк) — окно «Рентгена».
-            trace["graph_rows"] = [
-                {k: (str(v)[:300] if not isinstance(v, (str, int, float, bool, type(None))) else v)
-                 for k, v in row.items()}
-                for row in (graph_facts or [])[:20]
+            planner_extra = ""
+            cypher = (plan_debug or {}).get("cypher")
+            if cypher:
+                planner_extra = (
+                    f"=== CYPHER ===\n{cypher}\n\n"
+                    f"=== ПАРАМЕТРЫ ===\n"
+                    f"{json.dumps((plan_debug or {}).get('params', {}), ensure_ascii=False, indent=2)}\n\n"
+                    f"=== СТРОКИ ГРАФА ===\n"
+                    f"{json.dumps((graph_facts or [])[:20], ensure_ascii=False, indent=2)}"
+                )
+            calls = [
+                {"title": "Вызов 1 — роутер", "text": _fmt_call_window(router_sink)},
+                {"title": "Вызов 2 — планировщик", "text": _fmt_call_window(planner_sink, planner_extra)},
+                {"title": "Вызов 3 — ответ", "text": _fmt_call_window(answer_sink)},
             ]
         else:
+            calls = None
             trace = None
 
         return {
@@ -376,10 +411,10 @@ class GraphRAGSearcher:
             "mode": mode,
             "facts_count": len(graph_facts),
             "posts_used": len(posts) + len(source_posts),
-            # Панель «Рентген»: секции дословно как ушли в LLM + трейс
-            # конвейера. Только по запросу, чтобы не раздувать обычные ответы.
+            # Панель «Рентген»: три окна вызовов дословно. Только по запросу.
             "context": blocks if include_context else None,
             "trace": trace,
+            "calls": calls,
         }
 
     def close(self):

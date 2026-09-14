@@ -145,6 +145,7 @@ class AnswerGenerator:
         posts: list[dict] | None = None,
         source_posts: list[dict] | None = None,
         communities: list[dict] | None = None,
+        trace_sink: list | None = None,
     ) -> tuple[str, dict[str, str]]:
         """Ответ + секции контекста дословно как ушли в LLM (панель «Рентген»).
 
@@ -241,6 +242,7 @@ class AnswerGenerator:
                 ],
                 temperature=0.2,
                 max_tokens=3072,
+                trace_sink=trace_sink,
             )
             return answer, blocks
         except Exception as e:

@@ -44,23 +44,9 @@ export interface ChatRequest {
   include_context?: boolean
 }
 
-export interface ContextBlocks {
-  graph?: string | null
-  source_posts?: string | null
-  posts?: string | null
-  communities?: string | null
-}
-
-export interface TracePlanner {
-  plan: Record<string, unknown>
-  cypher: string | null
-  params: Record<string, unknown>
-}
-
-export interface TraceInfo {
-  router: { mode: ChatMode }
-  planner: TracePlanner | null
-  graph_rows: Record<string, unknown>[]
+export interface CallWindow {
+  title: string
+  text: string
 }
 
 export interface ChatResponse {
@@ -70,8 +56,7 @@ export interface ChatResponse {
   mode: ChatMode
   facts_count: number
   posts_used: number
-  context?: ContextBlocks | null
-  trace?: TraceInfo | null
+  calls?: CallWindow[] | null
 }
 
 // --- Status (FR-4.x) ---

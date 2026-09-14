@@ -44,6 +44,15 @@ def test_config(monkeypatch):
 
 class FakeSearcher:
     def search(self, question, include_context=False):
+        calls = (
+            [
+                {"title": "Вызов 1 — роутер", "text": "=== SYSTEM ===\n..."},
+                {"title": "Вызов 2 — планировщик", "text": "=== SYSTEM ===\n..."},
+                {"title": "Вызов 3 — ответ", "text": "=== SYSTEM ===\n..."},
+            ]
+            if include_context
+            else None
+        )
         return {
             "answer": "Ответ от тестового поисковика",
             "sources": [{"title": "Источник", "url": "https://vk.com/test"}],
@@ -51,14 +60,7 @@ class FakeSearcher:
             "mode": "local",
             "facts_count": 1,
             "posts_used": 2,
-            "context": {"graph": "=== ФАКТЫ ===\n- тест"} if include_context else None,
-            "trace": {
-                "router": {"mode": "local"},
-                "planner": {"plan": {"intent": "entity_detail"}, "cypher": "MOCK", "params": {}},
-                "graph_rows": [{"id": "тест"}],
-            }
-            if include_context
-            else None,
+            "calls": calls,
         }
 
 
@@ -162,7 +164,7 @@ def test_chat_without_credentials_401(mock_searcher):
 
 
 def test_chat_context_admin_only(mock_searcher):
-    # Панель «Рентген»: Bearer-админ + флаг -> контекст есть.
+    # Панель «Рентген»: Bearer-админ + флаг -> 3 окна вызовов.
     # (TEMP(ALL_ADMIN): гость сейчас админ; после отката брать admin-вход.)
     guest = client.post("/api/v1/auth/guest").json()
     resp = client.post(
@@ -171,24 +173,27 @@ def test_chat_context_admin_only(mock_searcher):
         headers={"Authorization": f"Bearer {guest['token']}"},
     )
     assert resp.status_code == 200
-    assert resp.json()["context"]["graph"] == "=== ФАКТЫ ===\n- тест"
-    assert resp.json()["trace"]["router"] == {"mode": "local"}
-    assert resp.json()["trace"]["planner"]["cypher"] == "MOCK"
-    # X-API-Key user + флаг -> контекста нет.
+    calls = resp.json()["calls"]
+    assert [c["title"] for c in calls] == [
+        "Вызов 1 — роутер",
+        "Вызов 2 — планировщик",
+        "Вызов 3 — ответ",
+    ]
+    # X-API-Key user + флаг -> окон нет.
     resp = client.post(
         "/api/v1/chat",
         json={"question": "Тест", "include_context": True},
         headers={"X-API-Key": USER_KEY},
     )
     assert resp.status_code == 200
-    assert resp.json()["context"] is None
-    # Без флага -> контекста нет даже у админа.
+    assert resp.json()["calls"] is None
+    # Без флага -> окон нет даже у админа.
     resp = client.post(
         "/api/v1/chat",
         json={"question": "Тест"},
         headers={"Authorization": f"Bearer {guest['token']}"},
     )
-    assert resp.json()["context"] is None
+    assert resp.json()["calls"] is None
 
 
 # --- A-7: VK sign ---

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from backend.api.auth import verify_admin_session_optional, verify_user_any
-from backend.api.schemas.chat import ChatRequest, ChatResponse, ContextBlocks, SourceInfo, TraceInfo
+from backend.api.schemas.chat import CallWindow, ChatRequest, ChatResponse, SourceInfo
 from backend.rag.searcher import GraphRAGSearcher
 from backend.utils.logger import setup_logger
 
@@ -36,10 +36,9 @@ async def chat(
             mode=result.get("mode", "basic"),
             facts_count=result.get("facts_count", 0),
             posts_used=result.get("posts_used", 0),
-            context=ContextBlocks(**(result.get("context") or {}))
+            calls=[CallWindow(**c) for c in (result.get("calls") or [])]
             if want_context
             else None,
-            trace=TraceInfo(**(result.get("trace") or {})) if want_context else None,
         )
     except Exception as e:
         logger.error(f"Chat error: {e}")

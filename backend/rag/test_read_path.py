@@ -77,9 +77,36 @@ def _searcher(router_mode, plan, facts, qtexts=None, vec_posts=None):
 
     s = mod.GraphRAGSearcher()
     s._router = MagicMock()
-    s._router.route.return_value = router_mode
+    # Мок пишет canned-обмен в sink — как настоящий роутер через trace_sink.
+    s._router.route.side_effect = lambda q, trace_sink=None: (
+        trace_sink.append(
+            {
+                "messages": [
+                    {"role": "system", "content": "ROUTER_PROMPT"},
+                    {"role": "user", "content": q},
+                ],
+                "response": '{"mode": "%s"}' % router_mode,
+            }
+        )
+        if trace_sink is not None
+        else None,
+        router_mode,
+    )[1]
     planner = MagicMock()
-    planner.plan.return_value = plan
+    planner.plan.side_effect = lambda q, trace_sink=None: (
+        trace_sink.append(
+            {
+                "messages": [
+                    {"role": "system", "content": "PLANNER_PROMPT"},
+                    {"role": "user", "content": q},
+                ],
+                "response": '{"intent": "%s"}' % (plan.get("intent") if plan else None),
+            }
+        )
+        if trace_sink is not None
+        else None,
+        plan,
+    )[1]
     planner.execute.return_value = (facts, {"cypher": "MOCK CYPHER", "params": {}})
     planner.resolve_org_exact.return_value = None
     s._planner = planner
@@ -88,7 +115,21 @@ def _searcher(router_mode, plan, facts, qtexts=None, vec_posts=None):
     vec._get_qdrant.return_value = FakeQdrant(qtexts or {})
     s._vec = vec
     gen = MagicMock()
-    gen.generate.return_value = ("ответ", {})
+
+    def _gen_side_effect(question, trace_sink=None, **kwargs):
+        if trace_sink is not None:
+            trace_sink.append(
+                {
+                    "messages": [
+                        {"role": "system", "content": "ANSWER_SYS"},
+                        {"role": "user", "content": question},
+                    ],
+                    "response": "ответ",
+                }
+            )
+        return ("ответ", getattr(gen, "_blocks_override", {}))
+
+    gen.generate.side_effect = _gen_side_effect
     s._answer_gen = gen
     return s, planner, vec, gen
 
@@ -188,11 +229,15 @@ def test_generate_returns_answer_and_blocks():
 
         def chat(self, messages, **kwargs):
             self.seen = messages
+            sink = kwargs.get("trace_sink")
+            if sink is not None:
+                sink.append({"messages": [dict(m) for m in messages], "response": "ответ"})
             return "ответ"
 
     gen = AnswerGenerator()
     stub = StubClient()
     gen._client = stub
+    sink: list = []
     answer, blocks = gen.generate(
         "кто командует",
         mode="struct",
@@ -201,8 +246,13 @@ def test_generate_returns_answer_and_blocks():
         posts=[],
         source_posts=[{"post_url": "u", "published_at": "2026-04-01",
                        "group_name": "g", "text": "текст поста"}],
+        trace_sink=sink,
     )
     assert answer == "ответ"
+    assert len(sink) == 1
+    assert sink[0]["messages"][0]["role"] == "system"
+    assert "кто командует" in sink[0]["messages"][1]["content"]
+    assert sink[0]["response"] == "ответ"
     assert "ФАКТЫ ИЗ ГРАФА" in blocks["graph"]
     assert "Иван" in blocks["graph"]
     assert "ПОСТЫ-ИСТОЧНИКИ" in blocks["source_posts"]
@@ -213,25 +263,27 @@ def test_generate_returns_answer_and_blocks():
 
 
 def test_search_context_flag():
-    # include_context=False (по умолчанию) — контекст не раздувает ответ.
+    # include_context=False (по умолчанию) — окон нет, ответ не раздут.
     s, planner, vec, gen = _searcher(
         "basic", {}, [],
         vec_posts=[{"post_url": "u", "text": "t", "group_name": "g",
                     "published_at": "2026-01-01"}],
     )
-    gen.generate.return_value = ("ответ", {"posts": "=== ПОСТЫ ===\n..."})
+    gen._blocks_override = {"posts": "=== ПОСТЫ ===\n..."}
     out = s.search("привет")
-    assert out["context"] is None
-    assert out["trace"] is None
+    assert out["calls"] is None
     out2 = s.search("привет", include_context=True)
-    assert out2["context"] == {"posts": "=== ПОСТЫ ===\n..."}
-    assert out2["trace"]["router"] == {"mode": "basic"}
-    assert out2["trace"]["planner"] is None  # basic планировщик не вызывает
-    assert out2["trace"]["graph_rows"] == []
+    assert [c["title"] for c in out2["calls"]] == [
+        "Вызов 1 — роутер",
+        "Вызов 2 — планировщик",
+        "Вызов 3 — ответ",
+    ]
+    # basic: планировщик не вызывался — окно честно пустое.
+    assert "вызовов не было" in out2["calls"][1]["text"]
 
 
 def test_search_trace_struct():
-    # Трейс struct: план + cypher + сырые строки графа.
+    # Окна struct: план + cypher + сырые строки графа в окне планировщика.
     facts = [{"person": "Иван", "relation": "COMMANDED",
               "source_post_url": "https://vk.com/x",
               "observed_at": "2026-03-01"}]
@@ -241,13 +293,13 @@ def test_search_trace_struct():
          "period_end": None},
         facts,
     )
-    gen.generate.return_value = ("ответ", {"graph": "=== ФАКТЫ ===\n..."})
+    gen._blocks_override = {"graph": "=== ФАКТЫ ===\n..."}
     out = s.search("кто командует", include_context=True)
-    tr = out["trace"]
-    assert tr["router"] == {"mode": "struct"}
-    assert tr["planner"]["cypher"] == "MOCK CYPHER"
-    assert tr["planner"]["plan"]["intent"] == "commanders"
-    assert tr["graph_rows"][0]["person"] == "Иван"
+    by_title = {c["title"]: c["text"] for c in out["calls"]}
+    assert "MOCK CYPHER" in by_title["Вызов 2 — планировщик"]
+    assert "Иван" in by_title["Вызов 2 — планировщик"]  # строки графа
+    assert "=== SYSTEM ===" in by_title["Вызов 1 — роутер"]
+    assert "=== ОТВЕТ ===" in by_title["Вызов 3 — ответ"]
 
 
 def test_cards_for_fact_sources():

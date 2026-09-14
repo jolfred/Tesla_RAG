@@ -13,21 +13,11 @@ class SourceInfo(BaseModel):
     url: str = ""
 
 
-class ContextBlocks(BaseModel):
-    """Секции контекста дословно как ушли в LLM (ключи — только непустые)."""
+class CallWindow(BaseModel):
+    """Одно окно панели «Рентген»: полный текст одного вызова модели."""
 
-    graph: str | None = None
-    source_posts: str | None = None
-    posts: str | None = None
-    communities: str | None = None
-
-
-class TraceInfo(BaseModel):
-    """Трейс конвейера для панели «Рентген» (только admin, только по запросу)."""
-
-    router: dict = {}
-    planner: dict | None = None
-    graph_rows: list[dict] = []
+    title: str = ""
+    text: str = ""
 
 
 class ChatResponse(BaseModel):
@@ -37,5 +27,4 @@ class ChatResponse(BaseModel):
     mode: str = "basic"
     facts_count: int = 0
     posts_used: int = 0
-    context: ContextBlocks | None = None
-    trace: TraceInfo | None = None
+    calls: list[CallWindow] | None = None

@@ -38,10 +38,12 @@ class GraphPlanner:
                 self._graph = None
         return self._graph
 
-    def plan(self, question: str) -> dict:
+    def plan(self, question: str, trace_sink: list | None = None) -> dict:
         llm = self._get_llm()
         try:
-            data = llm.extract_json(PLANNER_PROMPT, question, schema=PLANNER_SCHEMA)
+            data = llm.extract_json(
+                PLANNER_PROMPT, question, schema=PLANNER_SCHEMA, trace_sink=trace_sink
+            )
         except Exception as e:
             logger.warning("Planner LLM failed: %s", e)
             return {"intent": "general", **_DEFAULTS}

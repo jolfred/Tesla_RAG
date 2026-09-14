@@ -34,10 +34,12 @@ class QueryRouter:
             self._llm = GigaChatClient()
         return self._llm
 
-    def route(self, question: str) -> str:
+    def route(self, question: str, trace_sink: list | None = None) -> str:
         llm = self._get_llm()
         try:
-            data = llm.extract_json(ROUTER_PROMPT, question, schema=ROUTER_SCHEMA)
+            data = llm.extract_json(
+                ROUTER_PROMPT, question, schema=ROUTER_SCHEMA, trace_sink=trace_sink
+            )
             mode = data.get("mode")
             if mode in ("struct", "local", "global", "basic"):
                 return mode
