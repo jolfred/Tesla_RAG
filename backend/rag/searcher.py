@@ -22,6 +22,7 @@ from backend.rag.units_enrich import (
 )
 from backend.observability.store import TraceStore
 from backend.observability.tracing import Trace, estimate_tokens
+from backend.observability.checks import run_layer1
 from backend.utils.logger import setup_logger
 
 logger = setup_logger("searcher")
@@ -618,6 +619,8 @@ class GraphRAGSearcher:
             prompt_version=ANSWER_PROMPT_VERSION,
             extractor_prompt_version=self._extractor_versions(graph_facts),
             total_llm_calls=plan.llm_calls + len(answer_sink),
+            **run_layer1(answer, graph_facts,
+                         len(posts) + len(source_posts)),
         )
 
         if include_context:
@@ -726,6 +729,7 @@ class GraphRAGSearcher:
             final_answer=answer, prompt_version=ANSWER_PROMPT_VERSION,
             extractor_prompt_version=self._extractor_versions(rows),
             total_llm_calls=plan.llm_calls + len(answer_sink),
+            **run_layer1(answer, rows, len(posts) + len(source_posts)),
         )
         if include_context:
             calls = [
