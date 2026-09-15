@@ -361,3 +361,4 @@ def test_rule17_in_narrative_prompt():
     assert "17." in NARRATIVE_PROMPT
     assert "днём рождения" in NARRATIVE_PROMPT
     assert "дата назначения в архивах не зафиксирована" in NARRATIVE_PROMPT
+    assert "не позднее" in NARRATIVE_PROMPT

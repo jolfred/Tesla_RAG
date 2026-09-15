@@ -363,8 +363,9 @@ def partners_query_strict(plan: dict) -> Optional[tuple[str, dict]]:
     """Строгие партнёры (п.4 отзыва): направленный запрос от самой организации,
     внутренние пары вырезаны кодом, а не надеждой.
 
-    Исключаем: саму организацию, её подразделения (o-PART_OF->hq) и её
-    вышестоящую структуру (s-PART_OF->o). Отряды штаба — не партнёры.
+    Исключаем: саму организацию и её подразделения (o-PART_OF->hq).
+    Вышестоящие структуры (КГЭУ, РСО) НЕ исключаем — университет как
+    работодатель и есть целевой партнёр (п.4 отзыва).
     Двунаправленные дубли (штаб<->ПрогрессLAB) исчезают сами: субъект
     зафиксирован строго, обратные рёбра не матчатся.
     """
@@ -383,7 +384,6 @@ def partners_query_strict(plan: dict) -> Optional[tuple[str, dict]]:
             (o)-[:PART_OF]->(h)
             WHERE h.source_model = $model AND h.norm_id = $org_norm_id
           }
-          AND NOT EXISTS { (s)-[:PART_OF]->(o) }
         RETURN DISTINCT s.name AS subject, o.name AS partner,
                 r.date AS date, """ + _V3_PROPS + """,
                 r.description AS description,
