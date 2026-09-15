@@ -3,11 +3,13 @@
 Один файл storage/traces.db (WAL), ноль новых сервисов. Поля спанов —
 по семантике OpenTelemetry gen_ai (gen_ai.request.model, gen_ai.usage.*),
 чтобы будущий переезд на Langfuse/Phoenix был перекладкой, а не рерайтом.
+Путь переопределяется env TESLA_TRACES_DB (тесты, раннеры).
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -93,7 +95,8 @@ class TraceStore:
     никогда не должен ронять ответ пользователю."""
 
     def __init__(self, path: str | Path | None = None):
-        self.path = Path(path) if path else DEFAULT_PATH
+        env = os.getenv("TESLA_TRACES_DB")
+        self.path = Path(path or env or DEFAULT_PATH)
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._conn = sqlite3.connect(str(self.path))

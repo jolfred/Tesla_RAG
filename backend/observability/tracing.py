@@ -82,6 +82,15 @@ class Trace:
     def span(self, name: str, input_json=None) -> _Span:
         return _Span(self, name, input_json)
 
+    def event(self, name: str, input_json=None, output_json=None) -> None:
+        """Мгновенное событие без замера (render, dedupe-решения)."""
+        if self.enabled:
+            try:
+                self._store.add_span(self.trace_id, name, input_json,
+                                     output_json, 0)
+            except Exception:
+                pass
+
     def add_tokens(self, n: int) -> None:
         self._tokens += n or 0
 

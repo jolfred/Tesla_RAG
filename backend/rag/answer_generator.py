@@ -35,6 +35,14 @@ class AnswerGenerator:
     def __init__(self):
         self._client = None
         self._gigachat = None
+        # Использование токенов последнего вызова (Фаза 1 наблюдаемости).
+        self.last_usage: dict | None = None
+
+    def _remember_usage(self, client) -> None:
+        try:
+            self.last_usage = dict(getattr(client, "last_usage", None) or {})
+        except Exception:
+            self.last_usage = {}
 
     def _get_client(self):
         if self._client is not None:
@@ -198,6 +206,7 @@ class AnswerGenerator:
                 max_tokens=3072,
                 trace_sink=trace_sink,
             )
+            self._remember_usage(client)
         except Exception as e:
             logger.error(f"Entity-detail narrative failed: {e}")
             narrative = ""
@@ -311,6 +320,7 @@ class AnswerGenerator:
                 max_tokens=3072,
                 trace_sink=trace_sink,
             )
+            self._remember_usage(client)
             return answer, blocks
         except Exception as e:
             logger.error(f"Answer generation failed: {e}")

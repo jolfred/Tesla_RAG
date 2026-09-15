@@ -76,3 +76,43 @@ def test_quality_module_uses_store(tmp_path, monkeypatch):
     assert cur.fetchone()[0] == 1
     ql._store.close()
     monkeypatch.setattr(ql, "_store", None)
+
+
+def test_search_writes_trace(tmp_path, monkeypatch):
+    """Инструментированный search пишет трейс+спаны (Фаза 1)."""
+    from unittest.mock import MagicMock
+
+    from backend.rag import searcher as mod
+    from backend.rag.query_schemas import QueryPlan
+
+    monkeypatch.setenv("TESLA_TRACING_ENABLED", "1")
+    monkeypatch.setenv("TESLA_TRACES_DB", str(tmp_path / "t.db"))
+    monkeypatch.setattr(mod, "TRACING_ENABLED", True)
+    monkeypatch.setattr(
+        mod.query_planner, "classify_and_plan",
+        lambda q, graph=None, trace_sink=None: QueryPlan(
+            intent="general", mode="basic", kind="narrative", llm_calls=0),
+    )
+    s = mod.GraphRAGSearcher()
+    s._planner = MagicMock()
+    vec = MagicMock()
+    vec.search.return_value = []
+    s._vec = vec
+    gen = MagicMock()
+    gen.generate.return_value = ("ответ", {})
+    gen.last_usage = {}
+    s._answer_gen = gen
+    out = s.search("привет", source="manual_test")
+    assert out["answer"] == "ответ"
+
+    from backend.observability.store import TraceStore
+    store = TraceStore(tmp_path / "t.db")
+    tid = store.last_trace_id()
+    got = store.fetch_trace(tid)
+    assert got["question"] == "привет"
+    assert got["source"] == "manual_test"
+    assert got["mode"] == "basic"
+    assert got["prompt_version"] == "v5"
+    assert {sp["name"] for sp in got["spans"]} >= {
+        "classify_and_plan", "vector_search", "llm_answer"}
+    store.close()
