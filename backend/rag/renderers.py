@@ -123,16 +123,70 @@ def render_locations(facts: list[Fact], org_name: str) -> str | None:
     return _render_labeled("Локации", facts, org_name)
 
 
-def render_events(facts: list[Fact], org_name: str) -> str | None:
+def _event_date(f: Fact) -> str | None:
+    if f.event_date:
+        return f.event_date[:10]
+    for link in f.links or []:
+        for key in ("event_date", "observed_at", "date"):
+            if link.get(key):
+                return str(link[key])[:10]
+    return None
+
+
+def _event_urls(f: Fact, cap: int = 2) -> list[str]:
+    urls: list[str] = []
+    if f.source_post_url:
+        urls.append(f.source_post_url)
+    for link in f.links or []:
+        u = link.get("source_post_url")
+        if u and u not in urls:
+            urls.append(u)
+    return urls[:cap]
+
+
+def render_events(facts: list[Fact], org_name: str | None) -> str | None:
+    """Мероприятия с датой и ссылкой; дубли схлопываются.
+
+    Дубли: нормализованное имя содержится в другом («Школа Кандидатов
+    И Бойцов» vs «… «Погружение»») — оставляем более полное имя,
+    ссылки дублей добираем.
+    """
     if not facts:
         return None
-    lines = []
+    kept: list[list] = []  # [key, label, fact]
     for f in facts:
-        line = f"• {f.label or f.person}"
-        if f.event_date:
-            line += f" ({f.event_date[:10]})"
+        label = f.label or f.person
+        key = normalize_id(label)
+        if not key:
+            continue
+        for entry in kept:
+            if key == entry[0] or key in entry[0] or entry[0] in key:
+                if len(label) > len(entry[1]):
+                    entry[1] = label
+                kept_fact = entry[2]
+                if f.event_date and not kept_fact.event_date:
+                    kept_fact.event_date = f.event_date
+                if f.observed_at and not kept_fact.observed_at:
+                    kept_fact.observed_at = f.observed_at
+                have = set(_event_urls(kept_fact))
+                for u in _event_urls(f):
+                    if u not in have:
+                        kept_fact.links.append({"source_post_url": u})
+                        have.add(u)
+                break
+        else:
+            kept.append([key, label, f])
+    header = f"Мероприятия «{org_name}»:" if org_name and org_name != "архив" else "Мероприятия:"
+    lines = [header]
+    for _, label, f in kept:
+        line = f"• {label}"
+        date = _event_date(f)
+        if date:
+            line += f" — {date}"
+        for u in _event_urls(f):
+            line += f" · {u}"
         lines.append(line)
-    return f"Мероприятия «{org_name}»:\n" + "\n".join(lines)
+    return "\n".join(lines)
 
 
 def render_person_roles(facts: list[Fact], person_name: str) -> str | None:

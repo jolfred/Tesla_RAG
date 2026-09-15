@@ -83,14 +83,34 @@ def test_render_partners_events_projects_locations():
         "Штаб",
     ) == "Партнёры «Штаб»:\n• Ак Барс Банк (поддерживает Штаб)"
     assert r.render(
-        "events_in_period", [{"event": "Погружение", "event_date": "2026-01-15"}],
+        "events_in_period",
+        [{"event": "Погружение", "event_date": "2026-01-15",
+          "source_post_url": "https://vk.com/x"}],
         "Штаб",
-    ) == "Мероприятия «Штаб»:\n• Погружение (2026-01-15)"
+    ) == "Мероприятия «Штаб»:\n• Погружение — 2026-01-15 · https://vk.com/x"
     assert r.render("projects", [{"project": "Снежный десант"}], "Штаб") == (
         "Проекты «Штаб»:\n• Снежный десант"
     )
     assert r.render("locations", [{"location": "Казань"}], "Штаб") == (
         "Локации «Штаб»:\n• Казань"
+    )
+
+
+def test_render_events_dedupe_and_links():
+    facts = [
+        Fact(label="Школа Кандидатов И Бойцов",
+             links=[{"date": "2026-01-10",
+                     "source_post_url": "https://vk.com/a"}]),
+        Fact(label="Школа Кандидатов И Бойцов «Погружение»",
+             event_date="2026-01-15",
+             links=[{"source_post_url": "https://vk.com/b"}]),
+        Fact(label="Vk Fest"),
+    ]
+    assert r.render_events(facts, "архив") == (
+        "Мероприятия:\n"
+        "• Школа Кандидатов И Бойцов «Погружение» — 2026-01-15"
+        " · https://vk.com/a · https://vk.com/b\n"
+        "• Vk Fest"
     )
 
 

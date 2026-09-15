@@ -217,7 +217,7 @@ GOLDEN = [
     (_payload("events_in_period", period_start="2026-01-01",
               period_end="2026-03-31"),
      [{"event": "Погружение"}],
-     ("events_in_period", "struct", "enumerable"), "Мероприятия «архив»:"),
+     ("events_in_period", "struct", "enumerable"), "Мероприятия:"),
 ]
 
 
