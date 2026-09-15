@@ -24,6 +24,8 @@ from backend.utils.logger import setup_logger
 logger = setup_logger("searcher")
 
 _YEAR_RE = re.compile(r"(?:19|20)\d{2}")
+_BULLET_RE = re.compile(r"^\s*(?:•|[-*]|\d+[.)])\s+")
+_CONGRATS_RE = re.compile(r"дн[её]м рождения|поздравля|happy birthday", re.IGNORECASE)
 
 
 def _fmt_call_window(exchanges: list[dict], extra: str = "") -> str:
@@ -41,6 +43,34 @@ def _fmt_call_window(exchanges: list[dict], extra: str = "") -> str:
     if extra:
         parts.append(extra)
     return "\n\n".join(parts) if parts else "— вызовов не было —"
+
+
+def narrative_repeats_list(graph_facts: list[dict], answer: str,
+                           structured: str | None) -> bool:
+    """Проза дублирует блок списком (п.1 отзыва): прозу выкинуть.
+
+    Срабатывает только на списке: ≥2 буллетов с именами из фактов,
+    покрывающих ≥ половины имён. Абзац, упоминающий пару партнёров, —
+    не дубль, пропускаем.
+    """
+    prose = (answer[len(structured):]
+             if structured and answer.startswith(structured) else answer)
+    if not prose.strip():
+        return False
+    names = set()
+    for f in rows_to_facts(graph_facts or []):
+        for v in (f.person, f.subject, f.label):
+            if v and v != "?" and len(v) > 2:
+                names.add(v.lower())
+    if not names:
+        return False
+    lowered = prose.lower()
+    mentioned = {n for n in names if n in lowered}
+    named_bullets = sum(
+        1 for ln in prose.splitlines()
+        if _BULLET_RE.match(ln) and any(n in ln.lower() for n in names)
+    )
+    return named_bullets >= 2 and len(mentioned) * 2 >= len(names)
 
 
 def question_year(question: str) -> str | None:
@@ -420,6 +450,7 @@ class GraphRAGSearcher:
         narrative_blocks: dict = {}
         if plan.kind == "enumerable" and mode == "struct" and graph_facts:
             org_name = plan.org_filter or plan.org_norm_id or "архив"
+            structured = None
             if plan.intent == "commanders":
                 # Одно кресло — один действующий (без имён, только даты).
                 # Старый состав гаснет сам, когда приходит новый.
@@ -430,32 +461,38 @@ class GraphRAGSearcher:
                         supersede_roles(rows_to_facts(graph_facts)),
                     )
                 ]
-                # Стиль Летописи: детерминированный блок фактов + живой
-                # нарратив по постам. Факты не выдумываются — только стиль.
-                # LLM легла — answer_entity_detail вернёт голый шаблон.
                 structured = render_commanders(
                     rows_to_facts(graph_facts), org_name)
+            elif plan.intent == "units":
+                # Units — чистый список без прозы (решение пользователя).
+                rendered = self._render_units(
+                    graph_facts, org_name, plan.org_filter)
+            else:
+                structured = render(plan.intent, graph_facts, org_name)
+            if structured:
+                # Стиль Летописи всем шаблонам (п.3–4 отзыва): детерминированный
+                # блок фактов + живой нарратив. Факты не выдумываются.
+                # LLM легла — answer_entity_detail вернёт голый шаблон.
                 narrative_answer, narrative_blocks = (
                     self._get_answer_gen().answer_entity_detail(
                         question, structured, source_posts + posts,
                         trace_sink=answer_sink,
-                        facts_block=("=== ФАКТЫ ===\n" + structured
-                                     if structured else None),
+                        facts_block="=== ФАКТЫ ===\n" + structured,
                     )
                 )
                 if not (narrative_answer or "").strip():
                     narrative_answer = None
-                elif structured and "в архивах нет данных" in (
+                elif "в архивах нет данных" in (
                         narrative_answer or "").lower():
                     # Модель промолчала при живых фактах — оставляем
                     # детерминированный блок, противоречие выкидываем.
                     logger.warning("Narrative silence despite facts, dropping")
                     narrative_answer, narrative_blocks = structured, {}
-            elif plan.intent == "units":
-                rendered = self._render_units(
-                    graph_facts, org_name, plan.org_filter)
-            else:
-                rendered = render(plan.intent, graph_facts, org_name)
+                elif narrative_repeats_list(
+                        graph_facts, narrative_answer, structured):
+                    # Проза продублировала блок списком — оставляем блок.
+                    logger.warning("Narrative repeats list, dropping prose")
+                    narrative_answer, narrative_blocks = structured, {}
 
         answer_sink_note = ""
         if narrative_answer is not None:
@@ -552,9 +589,18 @@ class GraphRAGSearcher:
             posts = []
         if year_period[0] or year_period[1]:
             posts = _filter_posts_by_period(posts, *year_period)
+        # Поздравления — не биография (п.5 отзыва): выкидываем из контекста
+        # нарратива полностью. Осталась пустота — проза по одним фактам.
+        narrative_posts = [p for p in source_posts + posts
+                           if not _CONGRATS_RE.search(p.get("text") or "")]
         answer, blocks = self._get_answer_gen().answer_entity_detail(
-            question, structured, source_posts + posts, trace_sink=answer_sink,
+            question, structured, narrative_posts, trace_sink=answer_sink,
+            facts_block=("=== ФАКТЫ ===\n" + structured if structured else None),
         )
+        if structured and narrative_repeats_list(
+                rows, answer, structured):
+            logger.warning("Entity narrative repeats list, dropping prose")
+            answer, blocks = structured, {}
         sources = self._collect_sources("local", rows, source_posts, posts)
         if include_context:
             calls = [

@@ -59,7 +59,7 @@ def test_render_units_enriched_exact():
     assert render_units_enriched(items[:1], "Тесла") == (
         "Отряды «Тесла»:\n"
         "Строительное направление:\n"
-        "• Монолит — Студенческий строительный отряд «Монолит» Штаба СО КГЭУ «Тесла» Наш девиз отличный! (https://vk.com/ssomonolitkazan)"
+        "• Монолит (https://vk.com/ssomonolitkazan)"
     )
     assert render_units_enriched([], "Тесла") is None
 

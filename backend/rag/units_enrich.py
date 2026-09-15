@@ -93,7 +93,8 @@ def enrich_units(
 
 
 def render_units_enriched(items: list[dict], org_name: str) -> str | None:
-    """Группировка по направлениям + описание + ссылка (формат из отзыва)."""
+    """Группировка по направлениям + ссылка (п.2 отзыва: без рекламных
+    blurb'ов — нечитаемо). Формат: • Имя (vk-ссылка)."""
     if not items:
         return None
     lines = [f"Отряды «{org_name}»:"]
@@ -104,8 +105,6 @@ def render_units_enriched(items: list[dict], org_name: str) -> str | None:
             current = direction
             lines.append(f"{direction}:" if direction else "Другие отряды:")
         bullet = f"• {it['name']}"
-        if it.get("blurb"):
-            bullet += f" — {it['blurb']}"
         if it.get("url"):
             bullet += f" ({it['url']})"
         lines.append(bullet)

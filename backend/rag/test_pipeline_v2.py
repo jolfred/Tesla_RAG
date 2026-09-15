@@ -159,6 +159,9 @@ def test_answer_entity_detail_joins_blocks():
     assert answer.startswith("«Даниил Астафьев»:\n• Руководитель — Штаб")
     assert answer.endswith("проза")
     assert "16." in stub.seen[0]["content"]  # правило 16 ушло в модель
+    # Инструкция против дубля списка + стиль очерка.
+    assert "не перечисляй" in stub.seen[1]["content"]
+    assert "подтверждается" in stub.seen[1]["content"]
     assert set(blocks) == {"structured", "posts"}
 
 
@@ -202,3 +205,81 @@ def test_v2_entity_detail_path(monkeypatch):
     assert out["llm_calls"] == 1
     assert [c["title"] for c in out["calls"]] == [
         "Вызов 1 — план (v2)", "Вызов 2 — ответ"]
+
+
+def test_narrative_repeats_list_guard():
+    from backend.rag.searcher import narrative_repeats_list
+
+    facts = [
+        {"person": "Иван Петров", "role_title": "Командир"},
+        {"person": "Петр Иванов", "role_title": "Комиссар"},
+        {"person": "Анна Сидорова", "role_title": "Мастер"},
+        {"person": "Олег Кузнецов", "role_title": "Боец"},
+    ]
+    structured = "Командный состав:\n• Иван Петров — Командир"
+    dup = (structured + "\n\nВ состав входят:\n• Иван Петров — командир\n"
+           "• Петр Иванов — комиссар\n• Анна Сидорова — мастер\n"
+           "• Олег Кузнецов — боец")
+    assert narrative_repeats_list(facts, dup, structured) is True
+    # Абзац с парой имён — не дубль.
+    prose = (structured + "\n\nИван Петров руководит штабом второй год, "
+             "Петр Иванов помогает ему.")
+    assert narrative_repeats_list(facts, prose, structured) is False
+    assert narrative_repeats_list(facts, structured, structured) is False
+    assert narrative_repeats_list([], "текст", None) is False
+
+
+def test_v2_partners_narrative_style(monkeypatch):
+    """Партнёры — блок + нарратив, generate не вызывается."""
+    plan = QueryPlan(intent="partners", mode="struct", kind="enumerable",
+                     org_filter="Тесла", org_norm_id=HQ, limit=20, llm_calls=1)
+    s, gen = _v2_searcher(monkeypatch, plan, [
+        {"subject": "Штаб", "partner": "Ак Барс Банк"},
+        {"subject": "Штаб", "partner": "КГЭУ"},
+    ])
+    out = s.search("Кто партнёры штаба Тесла?")
+    assert out["answer"] == "структура\n\nпроза"
+    gen.generate.assert_not_called()
+    structured = gen.answer_entity_detail.call_args[0][1]
+    assert structured.startswith("Партнёры «Тесла»")
+    assert out["llm_calls"] == 1
+
+
+def test_v2_narrative_dup_suppressed(monkeypatch):
+    """Проза-дубль списка выкидывается, остаётся блок."""
+    s, gen = _v2_searcher(monkeypatch, _cmd_plan(), ROWS)
+    dup_prose = ("Командный состав «Тесла»:\n• X\n\nВ состав входят:\n"
+                 "• Даниил Астафьев — руководитель\n"
+                 "• Альфред Шарифуллин — комиссар")
+    gen.answer_entity_detail.return_value = (dup_prose, {})
+    out = s.search("Кто в комсоставе?")
+    assert out["answer"].startswith("Командный состав «Тесла»:")
+    assert "В состав входят" not in out["answer"]
+
+
+def test_v2_entity_congrats_dropped(monkeypatch):
+    """Поздравления не попадают в контекст нарратива."""
+    plan = QueryPlan(intent="entity_detail", mode="local", kind="narrative",
+                     target_name="Астафьев", llm_calls=1)
+    monkeypatch.setattr(
+        mod.query_planner, "classify_and_plan",
+        lambda q, graph=None, trace_sink=None: plan,
+    )
+    s = mod.GraphRAGSearcher()
+    planner = MagicMock()
+    planner._get_graph.return_value = None
+    s._planner = planner
+    vec = MagicMock()
+    vec.search.return_value = [
+        {"post_url": "hb", "published_at": "2025-02-25", "group_name": "g",
+         "text": "Поздравляем с днём рождения командира!"},
+        {"post_url": "ok", "published_at": "2024-09-30", "group_name": "g",
+         "text": "Прошла отчётно-выборная конференция штаба"},
+    ]
+    s._vec = vec
+    gen = MagicMock()
+    gen.answer_entity_detail.return_value = ("структура\n\nпроза", {})
+    s._answer_gen = gen
+    s.search("Кто такой Даниил Астафьев?")
+    posts = gen.answer_entity_detail.call_args[0][2]
+    assert [p["post_url"] for p in posts] == ["ok"]
