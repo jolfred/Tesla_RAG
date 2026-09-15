@@ -116,3 +116,25 @@ def test_search_writes_trace(tmp_path, monkeypatch):
     assert {sp["name"] for sp in got["spans"]} >= {
         "classify_and_plan", "vector_search", "llm_answer"}
     store.close()
+
+
+def test_judge_writes_judgement(tmp_path):
+    from backend.observability.judge import judge_trace, sample_traces
+
+    class FakeGrader:
+        def grade(self, case, answer):
+            assert "Эталонного ответа нет" in case["expected"]
+            return {"score": 2, "reason": "достоверно"}
+
+    s = _store(tmp_path)
+    t = Trace(s, "кто такой?", source="prod")
+    tid = t.finish(kind="narrative", final_answer="ответ", mode="local")
+    res = judge_trace(s, tid, FakeGrader())
+    assert res["faithfulness"] == 2
+    # Повтор — пропуск, дублей нет.
+    assert judge_trace(s, tid, FakeGrader())["skipped"] is True
+    assert sample_traces(s, 5) == []
+    cur = s._conn.execute(
+        "SELECT faithfulness_score, relevance_score FROM judgements")
+    assert cur.fetchall() == [(2, None)]
+    s.close()
