@@ -95,17 +95,23 @@ def render_winners(facts: list[Fact], org_name: str) -> str | None:
 
 
 def render_partners(facts: list[Fact], org_name: str) -> str | None:
+    """Партнёры без 20-кратного суффикса: субъект — один раз в заголовок."""
     if not facts:
         return None
-    lines = []
+    subjects = sorted({f.subject or "" for f in facts} - {""})
+    header = f"Партнёры «{org_name}»"
+    if len(subjects) == 1:
+        header += f" (поддерживают {subjects[0]})"
+    header += ":"
+    lines = [header]
     for f in facts:
         partner = f.org or (f.person if f.person != "?" else None) or f.label or "?"
         line = f"• {partner}"
-        if f.subject and f.subject != partner:
+        if len(subjects) != 1 and f.subject:
             line += f" (поддерживает {f.subject})"
         line += _subordinate_note(partner)
         lines.append(line)
-    return f"Партнёры «{org_name}»:\n" + "\n".join(lines)
+    return "\n".join(lines)
 
 
 def _render_labeled(header: str, facts: list[Fact], org_name: str) -> str | None:

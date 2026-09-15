@@ -131,6 +131,16 @@ def test_strict_queries_no_contains():
     uq, up = units_query_strict(uplan)
     assert "CONTAINS" not in uq and up["org_norm_id"] == HQ_NORM
 
+    from backend.rag.planner_queries import partners_query_strict
+    pplan = {"intent": "partners", "org_norm_id": HQ_NORM, "limit": 20}
+    pq, pp = partners_query_strict(pplan)
+    # Направленный запрос от самой org, внутренние пары вырезаны.
+    assert "CONTAINS" not in pq
+    assert "s.norm_id = $org_norm_id" in pq
+    assert "PART_OF" in pq and "o.norm_id <> $org_norm_id" in pq
+    assert pp["org_norm_id"] == HQ_NORM
+    assert partners_query_strict({"intent": "partners"}) is None
+
 
 def test_query_for_plan_v2_dispatch():
     q, _ = query_for_plan_v2(
@@ -207,7 +217,7 @@ GOLDEN = [
      ("winners", "struct", "enumerable"), "Награды «Тесла»:"),
     (_payload("partners", org_filter="Тесла"),
      [{"subject": "Штаб", "partner": "Ак Барс Банк"}],
-     ("partners", "struct", "enumerable"), "Партнёры «Тесла»:"),
+     ("partners", "struct", "enumerable"), "Партнёры «Тесла» (поддерживают Штаб):"),
     (_payload("projects", org_filter="Тесла"),
      [{"project": "Снежный десант"}],
      ("projects", "struct", "enumerable"), "Проекты «Тесла»:"),

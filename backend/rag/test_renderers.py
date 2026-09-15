@@ -79,9 +79,11 @@ def test_render_units_winners_members():
 def test_render_partners_events_projects_locations():
     assert r.render(
         "partners",
-        [{"subject": "Штаб", "partner": "Ак Барс Банк"}],
+        [{"subject": "Штаб", "partner": "Ак Барс Банк"},
+         {"subject": "Штаб", "partner": "КГЭУ"}],
         "Штаб",
-    ) == "Партнёры «Штаб»:\n• Ак Барс Банк (поддерживает Штаб)"
+    ) == ("Партнёры «Штаб» (поддерживают Штаб):\n"
+          "• Ак Барс Банк\n• КГЭУ")
     assert r.render(
         "events_in_period",
         [{"event": "Погружение", "event_date": "2026-01-15",

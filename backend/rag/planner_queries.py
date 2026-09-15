@@ -346,16 +346,53 @@ def units_query_strict(plan: dict) -> Optional[tuple[str, dict]]:
 
 
 def query_for_plan_v2(plan: dict) -> Optional[tuple[str, dict]]:
-    """Диспетчер v2: строгие запросы для commanders/units, остальное —
+    """Диспетчер v2: строгие запросы для commanders/units/partners, остальное —
     legacy-хендлеры с org_exact=org_norm_id (exact-first, без правок)."""
     plan = dict(plan)
     if plan.get("org_norm_id") and not plan.get("org_exact"):
         plan["org_exact"] = plan["org_norm_id"]
-    for strict in (commanders_query_strict, units_query_strict):
+    for strict in (commanders_query_strict, units_query_strict,
+                   partners_query_strict):
         result = strict(plan)
         if result is not None:
             return result
     return query_for_plan(plan)
+
+
+def partners_query_strict(plan: dict) -> Optional[tuple[str, dict]]:
+    """Строгие партнёры (п.4 отзыва): направленный запрос от самой организации,
+    внутренние пары вырезаны кодом, а не надеждой.
+
+    Исключаем: саму организацию, её подразделения (o-PART_OF->hq) и её
+    вышестоящую структуру (s-PART_OF->o). Отряды штаба — не партнёры.
+    Двунаправленные дубли (штаб<->ПрогрессLAB) исчезают сами: субъект
+    зафиксирован строго, обратные рёбра не матчатся.
+    """
+    if plan.get("intent") != "partners":
+        return None
+    org_norm_id = plan.get("org_norm_id")
+    if not org_norm_id:
+        return None
+    return (
+        """
+        MATCH (s)-[r:SUPPORTED_BY]->(o)
+        WHERE s.source_model = $model AND o.source_model = $model
+          AND s.norm_id = $org_norm_id
+          AND o.norm_id <> $org_norm_id
+          AND NOT EXISTS {
+            (o)-[:PART_OF]->(h)
+            WHERE h.source_model = $model AND h.norm_id = $org_norm_id
+          }
+          AND NOT EXISTS { (s)-[:PART_OF]->(o) }
+        RETURN DISTINCT s.name AS subject, o.name AS partner,
+                r.date AS date, """ + _V3_PROPS + """,
+                r.description AS description,
+                r.source_post_url AS source_post_url
+        ORDER BY o.name
+        LIMIT $limit
+        """,
+        {"model": MODEL, "org_norm_id": org_norm_id, "limit": _limit(plan)},
+    )
 
 
 def person_roles_query(target_name: str) -> Optional[tuple[str, dict]]:
