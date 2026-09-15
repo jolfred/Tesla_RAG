@@ -6,7 +6,7 @@ from pathlib import Path
 from backend.embeddings.vec_search import VectorSearcher
 from backend.rag import query_planner
 from backend.rag.answer_generator import AnswerGenerator
-from backend.rag.facts import rows_to_facts
+from backend.rag.facts import rows_to_facts, supersede_roles
 from backend.rag.graph_planner import GraphPlanner
 from backend.rag.planner_queries import person_roles_query
 from backend.rag.renderers import render, render_person_roles
@@ -405,6 +405,16 @@ class GraphRAGSearcher:
         rendered = None
         if plan.kind == "enumerable" and mode == "struct" and graph_facts:
             org_name = plan.org_filter or plan.org_norm_id or "архив"
+            if plan.intent == "commanders":
+                # Одно кресло — один действующий (без имён, только даты).
+                # Старый состав гаснет сам, когда приходит новый.
+                graph_facts = [
+                    {**f, "role_status": nf.role_status}
+                    for f, nf in zip(
+                        graph_facts,
+                        supersede_roles(rows_to_facts(graph_facts)),
+                    )
+                ]
             if plan.intent == "units":
                 rendered = self._render_units(
                     graph_facts, org_name, plan.org_filter)
@@ -494,7 +504,7 @@ class GraphRAGSearcher:
         except Exception:
             pass
         structured = render_person_roles(
-            rows_to_facts(rows), plan.target_name or "?")
+            supersede_roles(rows_to_facts(rows)), plan.target_name or "?")
         source_posts = self._resolve_source_posts(rows) if rows else []
         try:
             posts = self._get_vec().search(question, top_k=5)

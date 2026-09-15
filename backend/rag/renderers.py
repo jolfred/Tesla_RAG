@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from backend.common.canon import normalize_id
 from backend.config import PROGRESSLAB_IS_SUBORDINATE
-from backend.rag.facts import Fact, rows_to_facts
+from backend.rag.facts import Fact, role_rank, rows_to_facts
 
 
 def _subordinate_note(name: str) -> str:
@@ -24,18 +24,8 @@ def _subordinate_note(name: str) -> str:
 
 
 # Иерархия комсостава (пользовательское правило): командир -> комиссар ->
-# мастер -> пресса -> остальные. Первый — всегда командир (Даниил).
-def _role_rank(role_title: str | None) -> int:
-    t = normalize_id(role_title or "")
-    if "командир" in t:
-        return 0
-    if "комиссар" in t:
-        return 1
-    if "мастер" in t:
-        return 2
-    if "пресс" in t:
-        return 3
-    return 4
+# мастер -> пресса -> остальные. Первый — всегда командир.
+# Ранг — facts.role_rank (там же используется для кресел supersede).
 
 
 def _role_line(f: Fact) -> str:
@@ -54,7 +44,7 @@ def _role_line(f: Fact) -> str:
 def render_commanders(facts: list[Fact], org_name: str) -> str | None:
     if not facts:
         return None
-    ordered = sorted(facts, key=lambda f: (_role_rank(f.role_title), f.person))
+    ordered = sorted(facts, key=lambda f: (role_rank(f.role_title), f.person))
     lines = [_role_line(f) for f in ordered]
     return f"Командный состав «{org_name}»:\n" + "\n".join(lines)
 

@@ -8,7 +8,10 @@ LLM-промпт (answer_generator._fmt_facts) — берут Fact, не сыр�
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import re
+from dataclasses import dataclass, field, replace
+
+from backend.common.canon import normalize_id
 
 
 @dataclass
@@ -31,6 +34,69 @@ class Fact:
     label: str | None = None
     links: list = field(default_factory=list)
     sources: list = field(default_factory=list)
+
+
+_ROLE_STOP = frozenset(
+    {"штаб", "штаба", "со", "кгэу", "тесла", "рсо", "отряд", "отряда",
+     "центр", "центра", "направление", "направления", "проектный"}
+)
+
+
+def role_rank(role_title: str | None) -> int:
+    """Ранг должности для сортировки и кресел (без имён, только слова).
+
+    0 командир, 1 комиссар, 2 мастер, 3 пресса, 4 остальные.
+    """
+    t = normalize_id(role_title or "")
+    if "командир" in t:
+        return 0
+    if "комиссар" in t:
+        return 1
+    if "мастер" in t:
+        return 2
+    if "пресс" in t:
+        return 3
+    return 4
+
+
+def norm_role(role_title: str | None) -> str:
+    """Должность без привязки к организации — ключ кресла."""
+    toks = re.sub(r"[«»\"'()]", " ", normalize_id(role_title or "")).split()
+    return " ".join(w for w in toks if w not in _ROLE_STOP and len(w) > 1)
+
+
+def _fact_sort_date(f: Fact) -> str:
+    return (f.event_date or f.observed_at or f.date or "")[:10]
+
+
+def supersede_roles(facts: list[Fact]) -> list[Fact]:
+    """Одно кресло — один действующий. Только даты и должности, имён нет.
+
+    Группы-кресла: ранг 0/1 (командир, комиссар) — одно место: ключ (rank,),
+    поэтому «Руководитель (командир)» и «Командир» — одно кресло.
+    Остальные — по normalized должности (два мастера уживаются).
+    Побеждает max дата; проигравшие (старше или без даты при датированном
+    победителе) помечаются former. Без дат у всех — никого не гасим.
+    Уже бывшие в победе не участвуют. Возвращает новые объекты.
+    """
+    groups: dict[tuple, list[int]] = {}
+    for i, f in enumerate(facts):
+        rank = role_rank(f.role_title or f.relation)
+        key = ("seat", rank) if rank in (0, 1) else ("title", norm_role(f.role_title or f.relation))
+        groups.setdefault(key, []).append(i)
+    out = list(facts)
+    for idxs in groups.values():
+        contenders = [i for i in idxs if out[i].role_status != "former"]
+        if len(contenders) < 2:
+            continue
+        dated = [(_fact_sort_date(out[i]), i) for i in contenders]
+        if not any(d for d, _ in dated):
+            continue  # дат нет ни у кого — честно показываем всех
+        best = max(d for d, _ in dated)
+        for d, i in dated:
+            if d < best or (not d and best):
+                out[i] = replace(out[i], role_status="former")
+    return out
 
 
 _ORG_KEYS = ("org", "object", "target", "award", "partner", "location", "project")
