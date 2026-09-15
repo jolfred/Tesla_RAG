@@ -26,6 +26,7 @@ logger = setup_logger("searcher")
 _YEAR_RE = re.compile(r"(?:19|20)\d{2}")
 _BULLET_RE = re.compile(r"^\s*(?:•|[-*]|\d+[.)])\s+")
 _CONGRATS_RE = re.compile(r"дн[её]м рождения|поздравля|happy birthday", re.IGNORECASE)
+_DATE_HINT_RE = re.compile(r"(?:19|20)\d{2}|\d{1,2}[.\-]\d{1,2}[.\-]\d{2,4}")
 
 
 def _fmt_call_window(exchanges: list[dict], extra: str = "") -> str:
@@ -47,11 +48,12 @@ def _fmt_call_window(exchanges: list[dict], extra: str = "") -> str:
 
 def narrative_repeats_list(graph_facts: list[dict], answer: str,
                            structured: str | None) -> bool:
-    """Проза дублирует блок списком (п.1 отзыва): прозу выкинуть.
+    """Проза дублирует блок (п.1 отзыва): прозу выкинуть.
 
-    Срабатывает только на списке: ≥2 буллетов с именами из фактов,
-    покрывающих ≥ половины имён. Абзац, упоминающий пару партнёров, —
-    не дубль, пропускаем.
+    Два триггера: (а) список — ≥2 буллетов с именами, покрывающих
+    ≥ половины имён; (б) пересказ без добавленной стоимости — ≥ половины
+    имён и ни одной даты (проза ничего не добавила к блоку).
+    Абзац с парой упоминаний и датами — не дубль, пропускаем.
     """
     prose = (answer[len(structured):]
              if structured and answer.startswith(structured) else answer)
@@ -66,11 +68,17 @@ def narrative_repeats_list(graph_facts: list[dict], answer: str,
         return False
     lowered = prose.lower()
     mentioned = {n for n in names if n in lowered}
+    if len(mentioned) * 2 < len(names):
+        return False
     named_bullets = sum(
         1 for ln in prose.splitlines()
         if _BULLET_RE.match(ln) and any(n in ln.lower() for n in names)
     )
-    return named_bullets >= 2 and len(mentioned) * 2 >= len(names)
+    if named_bullets >= 2:
+        return True
+    # Пересказ без дат: проза повторила БОЛЬШИНСТВО имён, но информации
+    # не добавила (ровно половина — пограничный случай, пропускаем).
+    return len(mentioned) * 2 > len(names) and _DATE_HINT_RE.search(prose) is None
 
 
 def question_year(question: str) -> str | None:

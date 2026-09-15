@@ -221,10 +221,17 @@ def test_narrative_repeats_list_guard():
            "• Петр Иванов — комиссар\n• Анна Сидорова — мастер\n"
            "• Олег Кузнецов — боец")
     assert narrative_repeats_list(facts, dup, structured) is True
-    # Абзац с парой имён — не дубль.
+    # Абзац с половиной имён без дат — пограничный случай, пропускаем.
     prose = (structured + "\n\nИван Петров руководит штабом второй год, "
              "Петр Иванов помогает ему.")
     assert narrative_repeats_list(facts, prose, structured) is False
+    # Пересказ большинства имён без единой даты — дубль, выкидываем.
+    prose_all = (structured + "\n\nВ состав входят Иван Петров, Петр Иванов, "
+                 "Анна Сидорова и Олег Кузнецов.")
+    assert narrative_repeats_list(facts, prose_all, structured) is True
+    # Тот же пересказ, но с датой — добавленная стоимость, оставляем.
+    prose_dated = prose_all + " Собраны в 2025 году."
+    assert narrative_repeats_list(facts, prose_dated, structured) is False
     assert narrative_repeats_list(facts, structured, structured) is False
     assert narrative_repeats_list([], "текст", None) is False
 
