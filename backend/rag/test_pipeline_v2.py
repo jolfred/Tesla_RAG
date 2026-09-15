@@ -49,8 +49,8 @@ def test_v2_template_no_llm_answer(monkeypatch):
     out = s.search("Кто в комсоставе штаба Тесла?", include_context=True)
     assert out["answer"] == (
         "Командный состав «Тесла»:\n"
-        "• Даниил Астафьев — Руководитель (с 2026-04-01)\n"
-        "• Альфред Шарифуллин — Комиссар (упоминание от 2026-02-19)"
+        "• Альфред Шарифуллин — Комиссар (упоминание от 2026-02-19)\n"
+        "• Даниил Астафьев — Руководитель (с 2026-04-01)"
     )
     gen.generate.assert_not_called()
     assert out["llm_calls"] == 1  # только classify+plan
