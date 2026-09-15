@@ -265,10 +265,15 @@ class GraphRAGSearcher:
         return self.__dict__["_unit_metas_cache"]
 
     def _unit_card_meta(self, org_filter: str | None) -> dict | None:
-        """Сырая мета карточки штаба по имени (направления отрядов)."""
+        """Сырая мета карточки штаба по имени (направления отрядов).
+
+        'Тесла' подстрокой матчится и на ПрогрессLAB (файл раньше
+        по алфавиту, описание пустое) — выбираем карточку с направлениями.
+        """
         if not org_filter:
             return None
         key = org_filter.lower()
+        best = None
         if GROUPS_DIR.exists():
             for path in sorted(GROUPS_DIR.glob("groups_*.json")):
                 try:
@@ -276,9 +281,13 @@ class GraphRAGSearcher:
                         meta = json.load(f)
                 except (json.JSONDecodeError, OSError):
                     continue
-                if key in (meta.get("name") or "").lower():
+                if key not in (meta.get("name") or "").lower():
+                    continue
+                if best is None:
+                    best = meta
+                if parse_unit_directions(meta.get("description") or ""):
                     return meta
-        return None
+        return best
 
     def _render_units(self, graph_facts: list[dict], org_name: str,
                       org_filter: str | None) -> str | None:
@@ -430,10 +439,18 @@ class GraphRAGSearcher:
                     self._get_answer_gen().answer_entity_detail(
                         question, structured, source_posts + posts,
                         trace_sink=answer_sink,
+                        facts_block=("=== ФАКТЫ ===\n" + structured
+                                     if structured else None),
                     )
                 )
                 if not (narrative_answer or "").strip():
                     narrative_answer = None
+                elif structured and "в архивах нет данных" in (
+                        narrative_answer or "").lower():
+                    # Модель промолчала при живых фактах — оставляем
+                    # детерминированный блок, противоречие выкидываем.
+                    logger.warning("Narrative silence despite facts, dropping")
+                    narrative_answer, narrative_blocks = structured, {}
             elif plan.intent == "units":
                 rendered = self._render_units(
                     graph_facts, org_name, plan.org_filter)

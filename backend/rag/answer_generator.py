@@ -180,12 +180,15 @@ class AnswerGenerator:
         structured: str | None,
         posts: list[dict] | None = None,
         trace_sink: list | None = None,
+        facts_block: str | None = None,
     ) -> tuple[str, dict[str, str]]:
         """Фаза 5: структурный блок + LLM-абзац раздельными кусками.
 
         Галлюцинация в прозе не портит факты: детерминированный блок идёт
         первым как есть, narrative пишется только по постам (NARRATIVE_PROMPT
         с правилом 16). Возвращает (answer, blocks) как generate().
+        facts_block (опционально) — факты для контекста нарратива, чтобы
+        проза не говорила «нет данных» при живых фактах.
         """
         client = self._get_client()
         if client is None:
@@ -203,7 +206,7 @@ class AnswerGenerator:
         if post_lines:
             blocks["posts"] = "=== ПОСТЫ ===\n" + "\n".join(post_lines)
         context = "\n\n".join(
-            b for b in [blocks.get("posts")] if b
+            b for b in [facts_block, blocks.get("posts")] if b
         ) or "Контекст отсутствует."
         user_msg = f"Вопрос: {question}\n\n{context}\n\nОтветь на вопрос пользователя."
         try:

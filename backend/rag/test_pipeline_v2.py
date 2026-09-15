@@ -45,7 +45,34 @@ def _cmd_plan(**kw):
     return QueryPlan(**base)
 
 
+def test_v2_commanders_silence_suppressed(monkeypatch):
+    """Нарратив 'нет данных' при живых фактах — выкидываем, блок остаётся."""
+    s, gen = _v2_searcher(monkeypatch, _cmd_plan(), ROWS)
+    gen.answer_entity_detail.return_value = (
+        "структура\n\nВ архивах нет данных", {})
+    out = s.search("Кто в комсоставе штаба Тесла?")
+    assert out["answer"].startswith("Командный состав «Тесла»:")
+    assert "нет данных" not in out["answer"].lower()
+
+
+def test_unit_card_meta_prefers_directions(monkeypatch, tmp_path):
+    import json
+    from pathlib import Path
+    from backend.rag import searcher as mod
+
+    (Path(str(tmp_path)) / "groups_a.json").write_text(json.dumps(
+        {"name": "Тесла-филиал", "description": ""}), encoding="utf-8")
+    (Path(str(tmp_path)) / "groups_z.json").write_text(json.dumps(
+        {"name": "Тесла HQ", "description": "Отряды:\nНаправление:\n• [club1|«X»]"}),
+        encoding="utf-8")
+    monkeypatch.setattr(mod, "GROUPS_DIR", Path(str(tmp_path)))
+    s = mod.GraphRAGSearcher()
+    meta = s._unit_card_meta("тесла")
+    assert meta["name"] == "Тесла HQ"
+
+
 def test_v2_commanders_narrative_style(monkeypatch):
+    """Комсостав — стиль Летописи: блок фактов + нарратив, не сухое перечисление."""
     """Комсостав — стиль Летописи: блок фактов + нарратив, не сухое перечисление."""
     s, gen = _v2_searcher(monkeypatch, _cmd_plan(), ROWS)
     gen.answer_entity_detail.return_value = ("структура\n\nпроза", {})
