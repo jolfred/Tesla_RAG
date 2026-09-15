@@ -10,6 +10,11 @@ from backend.rag.facts import rows_to_facts
 from backend.rag.graph_planner import GraphPlanner
 from backend.rag.planner_queries import person_roles_query
 from backend.rag.renderers import render, render_person_roles
+from backend.rag.units_enrich import (
+    enrich_units,
+    parse_unit_directions,
+    render_units_enriched,
+)
 from backend.utils.logger import setup_logger
 
 logger = setup_logger("searcher")
@@ -240,6 +245,52 @@ class GraphRAGSearcher:
         logger.info("Resolved %d/%d source posts", len(posts), len(urls))
         return posts
 
+    def _unit_metas(self) -> dict[int, dict]:
+        """Метафайлы групп по numeric group_id (для обогащения units)."""
+        if self.__dict__.get("_unit_metas_cache") is None:
+            metas: dict[int, dict] = {}
+            if GROUPS_DIR.exists():
+                for path in sorted(GROUPS_DIR.glob("groups_*.json")):
+                    try:
+                        with path.open(encoding="utf-8") as f:
+                            meta = json.load(f)
+                        metas[int(meta.get("group_id") or 0)] = meta
+                    except (json.JSONDecodeError, OSError, ValueError, TypeError):
+                        continue
+            self.__dict__["_unit_metas_cache"] = metas
+        return self.__dict__["_unit_metas_cache"]
+
+    def _unit_card_meta(self, org_filter: str | None) -> dict | None:
+        """Сырая мета карточки штаба по имени (направления отрядов)."""
+        if not org_filter:
+            return None
+        key = org_filter.lower()
+        if GROUPS_DIR.exists():
+            for path in sorted(GROUPS_DIR.glob("groups_*.json")):
+                try:
+                    with path.open(encoding="utf-8") as f:
+                        meta = json.load(f)
+                except (json.JSONDecodeError, OSError):
+                    continue
+                if key in (meta.get("name") or "").lower():
+                    return meta
+        return None
+
+    def _render_units(self, graph_facts: list[dict], org_name: str,
+                      org_filter: str | None) -> str | None:
+        """Units с обогащением из карточки штаба, фолбэк — plain-рендер."""
+        meta = self._unit_card_meta(org_filter)
+        if meta is not None:
+            directions = parse_unit_directions(meta.get("description") or "")
+            if directions:
+                names = [
+                    f.label or f.person
+                    for f in rows_to_facts(graph_facts)
+                ]
+                items = enrich_units(names, directions, self._unit_metas())
+                return render_units_enriched(items, org_name)
+        return render("units", graph_facts, org_name)
+
     @staticmethod
     def _collect_sources(mode, graph_facts, source_posts, posts) -> list[dict]:
         # источники: сначала URL из фактов графа (релевантны периоду),
@@ -354,7 +405,11 @@ class GraphRAGSearcher:
         rendered = None
         if plan.kind == "enumerable" and mode == "struct" and graph_facts:
             org_name = plan.org_filter or plan.org_norm_id or "архив"
-            rendered = render(plan.intent, graph_facts, org_name)
+            if plan.intent == "units":
+                rendered = self._render_units(
+                    graph_facts, org_name, plan.org_filter)
+            else:
+                rendered = render(plan.intent, graph_facts, org_name)
 
         answer_sink_note = ""
         if rendered is not None:
