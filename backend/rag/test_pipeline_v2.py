@@ -33,6 +33,7 @@ def _v2_searcher(monkeypatch, plan, rows, vec_posts=None):
     s._vec = vec
     gen = MagicMock()
     gen.generate.return_value = ("llm-ответ", {})
+    gen.answer_entity_detail.return_value = ("структура\n\nпроза", {})
     s._answer_gen = gen
     return s, gen
 
@@ -44,20 +45,22 @@ def _cmd_plan(**kw):
     return QueryPlan(**base)
 
 
-def test_v2_template_no_llm_answer(monkeypatch):
+def test_v2_commanders_narrative_style(monkeypatch):
+    """Комсостав — стиль Летописи: блок фактов + нарратив, не сухое перечисление."""
     s, gen = _v2_searcher(monkeypatch, _cmd_plan(), ROWS)
+    gen.answer_entity_detail.return_value = ("структура\n\nпроза", {})
     out = s.search("Кто в комсоставе штаба Тесла?", include_context=True)
-    assert out["answer"] == (
-        "Командный состав «Тесла»:\n"
-        "• Альфред Шарифуллин — Комиссар (упоминание от 2026-02-19)\n"
-        "• Даниил Астафьев — Руководитель (с 2026-04-01)"
-    )
+    assert out["answer"] == "структура\n\nпроза"
     gen.generate.assert_not_called()
-    assert out["llm_calls"] == 1  # только classify+plan
+    structured = gen.answer_entity_detail.call_args[0][1]
+    # Факты детерминированы и ранжированы: комиссар (ранг 1) выше
+    # «Руководителя» без «командир» (ранг 4).
+    assert structured.startswith("Командный состав «Тесла»:\n• Альфред Шарифуллин")
+    assert "Даниил Астафьев" in structured
+    assert out["llm_calls"] == 1  # мок в sink не пишет
     assert [c["title"] for c in out["calls"]] == [
         "Вызов 1 — план (v2)", "Вызов 2 — ответ"]
     assert "STRICT CYPHER" in out["calls"][0]["text"]
-    assert "=== ШАБЛОН ===" in out["calls"][1]["text"]
     assert out["mode"] == "struct" and out["facts_count"] == 2
 
 

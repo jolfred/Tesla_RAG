@@ -128,6 +128,7 @@ def _searcher(monkeypatch, mode, intent, rows, qtexts=None, vec_posts=None,
         return ("ответ", getattr(gen, "_blocks_override", {}))
 
     gen.generate.side_effect = _gen_side_effect
+    gen.answer_entity_detail.return_value = ("структура\n\nпроза", {})
     s._answer_gen = gen
     return s, planner, vec, gen
 
@@ -142,11 +143,11 @@ def test_struct_uses_source_posts_no_vector(monkeypatch):
     )
     out = s.search("кто командует")
     vec.search.assert_not_called()  # вектора в struct с фактами нет
-    gen.generate.assert_not_called()  # ответ — шаблон, 0 LLM
-    assert out["answer"] == (
-        "Командный состав «архив»:\n"
-        "• Иван — должность не указана (упоминание от 2026-03-01)"
-    )
+    gen.generate.assert_not_called()  # комсостав — факты + нарратив, не generate
+    # Стиль Летописи: структурный блок + проза, факты из шаблона.
+    assert out["answer"] == "структура\n\nпроза"
+    structured = gen.answer_entity_detail.call_args[0][1]
+    assert "Командный состав" in structured and "Иван" in structured
     assert out["posts_used"] == 1
     assert out["llm_calls"] == 1
 
@@ -290,8 +291,8 @@ def test_search_trace_struct(monkeypatch):
     assert "MOCK CYPHER" in by_title["Вызов 1 — план (v2)"]
     assert "Иван" in by_title["Вызов 1 — план (v2)"]  # строки графа
     assert "=== SYSTEM ===" in by_title["Вызов 1 — план (v2)"]
-    # Ответ — шаблон: LLM не вызывалась, окно честно говорит об этом.
-    assert "=== ШАБЛОН ===" in by_title["Вызов 2 — ответ"]
+    # Комсостав — факты + нарратив: generate не вызывался.
+    assert out["answer"] == "структура\n\nпроза"
     gen.generate.assert_not_called()
 
 
@@ -319,3 +320,44 @@ def test_cards_for_fact_sources():
         assert len(cards) == 1
         assert "Иван — командир" in cards[0]["text"]
         assert cards[0]["post_url"] == "group://rso_tesla"
+
+
+def test_short_prompt_for_struct_full_for_basic():
+    from backend.rag.answer_generator import (
+        ANSWER_PROMPT_VERSION,
+        BASE_PROMPT,
+        SHORT_PROMPT,
+        AnswerGenerator,
+    )
+
+    assert ANSWER_PROMPT_VERSION == "v4"
+    assert len(SHORT_PROMPT) < len(BASE_PROMPT) // 2
+    for rule in ("архивах нет данных", "Поздравления", "связанные сообщества"):
+        assert rule in SHORT_PROMPT
+
+    seen = {}
+
+    class StubClient:
+        def chat(self, messages, **kwargs):
+            sink = kwargs.get("trace_sink")
+            if sink is not None:
+                sink.append({"messages": [dict(m) for m in messages],
+                             "response": "ответ"})
+            return "ответ"
+
+    gen = AnswerGenerator()
+    gen._client = StubClient()
+    sink_s, sink_b = [], []
+    gen.generate("q", mode="struct", graph_facts=[], posts=[],
+                 trace_sink=sink_s)
+    gen.generate("q", mode="basic", graph_facts=[], posts=[],
+                 trace_sink=sink_b)
+    assert sink_s[0]["messages"][0]["content"] == SHORT_PROMPT
+    assert sink_b[0]["messages"][0]["content"] == BASE_PROMPT
+
+
+def test_rule17_in_narrative_prompt():
+    from backend.rag.answer_generator import NARRATIVE_PROMPT
+    assert "17." in NARRATIVE_PROMPT
+    assert "днём рождения" in NARRATIVE_PROMPT
+    assert "дата назначения в архивах не зафиксирована" in NARRATIVE_PROMPT

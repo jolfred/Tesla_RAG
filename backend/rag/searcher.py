@@ -9,7 +9,11 @@ from backend.rag.answer_generator import AnswerGenerator
 from backend.rag.facts import rows_to_facts, supersede_roles
 from backend.rag.graph_planner import GraphPlanner
 from backend.rag.planner_queries import person_roles_query
-from backend.rag.renderers import render, render_person_roles
+from backend.rag.renderers import (
+    render,
+    render_commanders,
+    render_person_roles,
+)
 from backend.rag.units_enrich import (
     enrich_units,
     parse_unit_directions,
@@ -403,6 +407,8 @@ class GraphRAGSearcher:
                 posts = _filter_posts_by_period(posts, *year_period)
 
         rendered = None
+        narrative_answer = None
+        narrative_blocks: dict = {}
         if plan.kind == "enumerable" and mode == "struct" and graph_facts:
             org_name = plan.org_filter or plan.org_norm_id or "архив"
             if plan.intent == "commanders":
@@ -415,16 +421,32 @@ class GraphRAGSearcher:
                         supersede_roles(rows_to_facts(graph_facts)),
                     )
                 ]
-            if plan.intent == "units":
+                # Стиль Летописи: детерминированный блок фактов + живой
+                # нарратив по постам. Факты не выдумываются — только стиль.
+                # LLM легла — answer_entity_detail вернёт голый шаблон.
+                structured = render_commanders(
+                    rows_to_facts(graph_facts), org_name)
+                narrative_answer, narrative_blocks = (
+                    self._get_answer_gen().answer_entity_detail(
+                        question, structured, source_posts + posts,
+                        trace_sink=answer_sink,
+                    )
+                )
+                if not (narrative_answer or "").strip():
+                    narrative_answer = None
+            elif plan.intent == "units":
                 rendered = self._render_units(
                     graph_facts, org_name, plan.org_filter)
             else:
                 rendered = render(plan.intent, graph_facts, org_name)
 
         answer_sink_note = ""
-        if rendered is not None:
+        if narrative_answer is not None:
+            answer = narrative_answer
+            blocks = narrative_blocks if include_context else {}
+        elif rendered is not None:
             answer = rendered
-            blocks: dict = {"rendered": rendered} if include_context else {}
+            blocks = {"rendered": rendered} if include_context else {}
         elif plan.kind == "enumerable" and not graph_facts and not posts:
             # Оба источника пусты — тишина сразу, без LLM-вызова.
             answer = "В архивах нет данных"
