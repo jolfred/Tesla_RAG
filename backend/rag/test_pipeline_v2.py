@@ -158,7 +158,7 @@ def test_answer_entity_detail_joins_blocks():
     )
     assert answer.startswith("«Даниил Астафьев»:\n• Руководитель — Штаб")
     assert answer.endswith("проза")
-    assert "16." in stub.seen[0]["content"]  # правило 16 ушло в модель
+    assert "связанные сообщества" in stub.seen[0]["content"]  # иерархия ушла в модель
     # Инструкция против дубля списка + стиль очерка.
     assert "не перечисляй" in stub.seen[1]["content"]
     assert "подтверждается" in stub.seen[1]["content"]
@@ -232,6 +232,10 @@ def test_narrative_repeats_list_guard():
     # Тот же пересказ, но с датой — добавленная стоимость, оставляем.
     prose_dated = prose_all + " Собраны в 2025 году."
     assert narrative_repeats_list(facts, prose_dated, structured) is False
+    # Очерк об одном человеке не давим никогда (имя упоминать естественно).
+    solo = [{"person": "Иван Петров", "role_title": "Командир"}]
+    essay = "«Иван Петров»:\n\nИван Петров руководит штабом. Ранее он был бойцом."
+    assert narrative_repeats_list(solo, essay, "«Иван Петров»:") is False
     assert narrative_repeats_list(facts, structured, structured) is False
     assert narrative_repeats_list([], "текст", None) is False
 

@@ -51,9 +51,10 @@ def narrative_repeats_list(graph_facts: list[dict], answer: str,
     """Проза дублирует блок (п.1 отзыва): прозу выкинуть.
 
     Два триггера: (а) список — ≥2 буллетов с именами, покрывающих
-    ≥ половины имён; (б) пересказ без добавленной стоимости — ≥ половины
-    имён и ни одной даты (проза ничего не добавила к блоку).
-    Абзац с парой упоминаний и датами — не дубль, пропускаем.
+    ≥ половины имён; (б) пересказ без добавленной стоимости — от 3 имён,
+    большинство упомянуто и ни одной даты (проза ничего не добавила).
+    Очерк об одном человеке (1–2 имени) никогда не давим: упоминание
+    имени там естественно. Абзац с датами — не дубль, пропускаем.
     """
     prose = (answer[len(structured):]
              if structured and answer.startswith(structured) else answer)
@@ -76,9 +77,10 @@ def narrative_repeats_list(graph_facts: list[dict], answer: str,
     )
     if named_bullets >= 2:
         return True
-    # Пересказ без дат: проза повторила БОЛЬШИНСТВО имён, но информации
-    # не добавила (ровно половина — пограничный случай, пропускаем).
-    return len(mentioned) * 2 > len(names) and _DATE_HINT_RE.search(prose) is None
+    # Пересказ без дат: от 3 имён, большинство упомянуто, информации
+    # не добавлено (ровно половина — пограничный случай, пропускаем).
+    return (len(names) >= 3 and len(mentioned) * 2 > len(names)
+            and _DATE_HINT_RE.search(prose) is None)
 
 
 def question_year(question: str) -> str | None:

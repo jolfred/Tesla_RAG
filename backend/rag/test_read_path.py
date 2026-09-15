@@ -322,20 +322,24 @@ def test_cards_for_fact_sources():
         assert cards[0]["post_url"] == "group://rso_tesla"
 
 
-def test_short_prompt_for_struct_full_for_basic():
+def test_base_prompt_minimal():
+    """Летопись ужата до минимума: 6 правил, без раздутых чек-листов."""
     from backend.rag.answer_generator import (
         ANSWER_PROMPT_VERSION,
         BASE_PROMPT,
-        SHORT_PROMPT,
+        NARRATIVE_PROMPT,
         AnswerGenerator,
     )
 
-    assert ANSWER_PROMPT_VERSION == "v4"
-    assert len(SHORT_PROMPT) < len(BASE_PROMPT) // 2
-    for rule in ("архивах нет данных", "Поздравления", "связанные сообщества"):
-        assert rule in SHORT_PROMPT
-
-    seen = {}
+    assert ANSWER_PROMPT_VERSION == "v5"
+    assert len(BASE_PROMPT) < 1200
+    for gone in ("Антитавтология", "Зимние выезды", "чек-лист достоверности",
+                 "16.", "17."):
+        assert gone not in BASE_PROMPT
+    for rule in ("архивах нет данных", "Поздравления", "связанные сообщества",
+                 "не позднее", "[экс/бывший]", "Награда принадлежит"):
+        assert rule in BASE_PROMPT
+    assert "очерк" in NARRATIVE_PROMPT
 
     class StubClient:
         def chat(self, messages, **kwargs):
@@ -352,13 +356,13 @@ def test_short_prompt_for_struct_full_for_basic():
                  trace_sink=sink_s)
     gen.generate("q", mode="basic", graph_facts=[], posts=[],
                  trace_sink=sink_b)
-    assert sink_s[0]["messages"][0]["content"] == SHORT_PROMPT
+    # Один минимум на все режимы (SHORT удалён).
+    assert sink_s[0]["messages"][0]["content"] == BASE_PROMPT
     assert sink_b[0]["messages"][0]["content"] == BASE_PROMPT
 
 
-def test_rule17_in_narrative_prompt():
+def test_narrative_rules_kept():
     from backend.rag.answer_generator import NARRATIVE_PROMPT
-    assert "17." in NARRATIVE_PROMPT
-    assert "днём рождения" in NARRATIVE_PROMPT
-    assert "дата назначения в архивах не зафиксирована" in NARRATIVE_PROMPT
+    assert "Поздравления" in NARRATIVE_PROMPT
     assert "не позднее" in NARRATIVE_PROMPT
+    assert "связанные сообщества" in NARRATIVE_PROMPT
