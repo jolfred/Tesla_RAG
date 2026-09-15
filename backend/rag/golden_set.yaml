@@ -1,0 +1,44 @@
+# Эталонный регресс-набор (Фаза 4 плана наблюдаемости).
+# Формализация Milestone D + всех галлюцинаций, найденных в диалоге.
+# Для enumerable — точное начало шаблона; для нарративных —
+# contains/excludes (exact-match там хрупок).
+
+- id: commanders_hq
+  question: "Кто входит в командный состав штаба Тесла?"
+  expect_intent: commanders
+  expect_slots: {org_filter: "Тесла"}
+  expect_template_start: "Командный состав"
+  expect_contains: ["Даниил Астафьев"]
+  expect_excludes: ["ПрогрессLAB", "часть Штаба"]
+
+- id: units_hq
+  question: "Перечисли все отряды штаба Тесла"
+  expect_intent: units
+  expect_slots: {org_filter: "Тесла"}
+  expect_template_start: "Отряды"
+  expect_contains: ["Монолит", "Строительное направление"]
+  expect_excludes: []
+
+- id: partners_hq
+  question: "Кто партнёры штаба Тесла?"
+  expect_intent: partners
+  expect_slots: {org_filter: "Тесла"}
+  expect_template_start: "Партнёры"
+  expect_contains: ["Ак Барс Банк"]
+  expect_excludes: ["Дайнима", "Монолит", "Оникс"]
+
+- id: entity_astafiev
+  question: "Кто такой Даниил Астафьев?"
+  expect_intent: entity_detail
+  expect_slots: {target_name: "Астафьев"}
+  expect_template_start: ""
+  expect_contains: ["Руководитель (командир)"]
+  expect_excludes: ["с февраля 2025", "осуществляет командование", "подтверждается"]
+
+- id: events_2026
+  question: "Какие мероприятия были в начале 2026 года?"
+  expect_intent: events_in_period
+  expect_slots: {}
+  expect_template_start: "Мероприятия"
+  expect_contains: ["Погружение"]
+  expect_excludes: []

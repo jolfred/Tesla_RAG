@@ -662,6 +662,7 @@ class GraphRAGSearcher:
             "calls": calls,
             # Метрика Фазы 6: сколько LLM-вызовов ушло на вопрос.
             "llm_calls": plan.llm_calls + len(answer_sink),
+            "trace_id": trace.trace_id,
         }
 
     def _search_v2_entity(
@@ -751,6 +752,7 @@ class GraphRAGSearcher:
             "trace": None,
             "calls": calls,
             "llm_calls": plan.llm_calls + len(answer_sink),
+            "trace_id": trace.trace_id,
         }
 
     def close(self):
