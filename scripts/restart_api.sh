@@ -21,5 +21,14 @@ setsid nohup .venv/bin/python -m uvicorn backend.main:app \
 echo $! > "$PIDFILE"
 
 sleep 10
-curl -s http://localhost:8000/api/v1/status --max-time 10 | head -c 150
+STATUS="$(curl -s http://localhost:8000/api/v1/status --max-time 10)"
+echo "$STATUS" | head -c 150
 echo
+if ! echo "$STATUS" | grep -q '"status":"ok"'; then
+    echo "API не поднялся (порт занят старым процессом?)" >&2
+    exit 1
+fi
+if ! kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+    echo "PID из $PIDFILE мёртв" >&2
+    exit 1
+fi

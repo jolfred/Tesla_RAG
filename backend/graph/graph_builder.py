@@ -24,7 +24,11 @@ class _EventDateNoticeFilter(logging.Filter):
         return "property `event_date` does not exist" not in msg
 
 
-logging.getLogger("neo4j").addFilter(_EventDateNoticeFilter())
+for _lname in ("neo4j", "neo4j.notifications"):
+    _lg = logging.getLogger(_lname)
+    if not any(isinstance(f, _EventDateNoticeFilter)
+               for f in _lg.filters):
+        _lg.addFilter(_EventDateNoticeFilter())
 
 
 class GraphBuilder:
