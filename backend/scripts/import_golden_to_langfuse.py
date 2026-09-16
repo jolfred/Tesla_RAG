@@ -1,9 +1,14 @@
-"""Разовый импорт golden_set.yaml → Langfuse Dataset `regression-golden-set`.
+"""Импорт yaml-набора → Langfuse Dataset.
+
+По умолчанию: golden_set.yaml → `regression-golden-set`.
+Пул вопросов: --source backend/rag/question_pool.yaml --dataset question-pool.
 
 Идемпотентен по case id: существующие items не дублируются
 (проверка по metadata.case_id).
 """
 from __future__ import annotations
+
+import argparse
 
 import yaml
 
@@ -12,21 +17,24 @@ from backend.utils.logger import setup_logger
 
 logger = setup_logger("lf_import_golden")
 
-DATASET = "regression-golden-set"
-
 
 def main() -> int:
+    ap = argparse.ArgumentParser(description="Импорт набора в Dataset")
+    ap.add_argument("--source", default="backend/rag/golden_set.yaml")
+    ap.add_argument("--dataset", default="regression-golden-set")
+    args = ap.parse_args()
+
     lf = _lf.get_langfuse()
     assert lf is not None, "Langfuse недоступен (LANGFUSE_ENABLED=1?)"
-    with open("backend/rag/golden_set.yaml", encoding="utf-8") as f:
+    with open(args.source, encoding="utf-8") as f:
         cases = yaml.safe_load(f)
     try:
-        ds = lf.get_dataset(DATASET)
+        ds = lf.get_dataset(args.dataset)
         existing = {i.metadata.get("case_id") for i in ds.items}
     except Exception:
         lf.create_dataset(
-            name=DATASET,
-            description="Регресс RAG-ответов (миграция golden_set.yaml)",
+            name=args.dataset,
+            description=f"Импорт {args.source}",
         )
         existing = set()
     added = 0
@@ -34,19 +42,21 @@ def main() -> int:
         if c["id"] in existing:
             continue
         lf.create_dataset_item(
-            dataset_name=DATASET,
+            dataset_name=args.dataset,
             input={"question": c["question"]},
             expected_output={
                 "contains": c.get("contains", []),
                 "excludes": c.get("excludes", []),
                 "intent": c.get("expect_intent"),
+                "expect_silence": bool(c.get("expect_silence", False)),
             },
             metadata={"case_id": c["id"],
-                      "intent": c.get("expect_intent")},
+                      "intent": c.get("expect_intent"),
+                      "notes": c.get("notes", "")},
         )
         added += 1
     lf.flush()
-    print(f"dataset={DATASET} added={added} total={len(cases)}")
+    print(f"dataset={args.dataset} added={added} total={len(cases)}")
     return 0
 
 

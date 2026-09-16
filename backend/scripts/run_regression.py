@@ -1,8 +1,11 @@
-"""L4: регресс по Langfuse Dataset `regression-golden-set` через Experiment API.
+"""Прогон Dataset через Experiment API (регресс или пул вопросов).
+
+По умолчанию: `regression-golden-set` + golden_set.yaml (строго, exit 1).
+Пул: --dataset question-pool --yaml backend/rag/question_pool.yaml
+(мягко: пустые ожидания проходят, оценка — Слой 1 + судья в UI).
 
 Каждый запуск виден в UI как отдельный run. Живые вызовы:
 Neo4j + Qdrant + GigaChat. max_concurrency=1 (общий searcher).
-Exit 1 при любом провале (для CI).
 """
 from __future__ import annotations
 
@@ -47,6 +50,10 @@ def evaluator_contains(*, input, output, expected_output, metadata,
         exp = _EXPECT[case_id]
     answer = (output.get("answer", "") or "") if isinstance(output, dict) \
         else str(output or "")
+    if exp.get("expect_silence"):
+        ok = "архивах нет данных" in answer.lower()
+        return {"name": "regression_contains", "value": 1.0 if ok else 0.0,
+                "comment": f"expect_silence, silent={ok}"}
     missing = [s for s in exp.get("contains", []) if s not in answer]
     present_bad = [s for s in exp.get("excludes", []) if s in answer]
     ok = not missing and not present_bad
@@ -59,27 +66,34 @@ def main() -> int:
     ap.add_argument("--ids", default=None,
                     help="подмножество case_id через запятую")
     ap.add_argument("--run-name", default=None)
+    ap.add_argument("--dataset", default=DATASET)
+    ap.add_argument("--yaml", default="backend/rag/golden_set.yaml")
+    ap.add_argument("--soft", action="store_true",
+                    help="пул: exit 0 даже при провалах (смотреть UI)")
     args = ap.parse_args()
 
     lf = _lf.get_langfuse()
     assert lf is not None, "Langfuse недоступен (LANGFUSE_ENABLED=1?)"
-    with open("backend/rag/golden_set.yaml", encoding="utf-8") as f:
+    with open(args.yaml, encoding="utf-8") as f:
         for c in yaml.safe_load(f):
             _EXPECT[c["id"]] = {"contains": c.get("contains", []),
-                                "excludes": c.get("excludes", [])}
+                                "excludes": c.get("excludes", []),
+                                "expect_silence": bool(
+                                    c.get("expect_silence", False))}
     import datetime
+    prefix = "pool" if args.dataset != DATASET else "regression"
     run_name = args.run_name or datetime.datetime.now().strftime(
-        "regression-%Y%m%d-%H%M%S")
+        f"{prefix}-%Y%m%d-%H%M%S")
     only = set(args.ids.split(",")) if args.ids else None
 
-    ds = lf.get_dataset(DATASET)
+    ds = lf.get_dataset(args.dataset)
     items = [i for i in ds.items
              if only is None or (i.metadata or {}).get("case_id") in only]
     if not items:
         print("нет кейсов (импорт: import_golden_to_langfuse.py)")
         return 2
     result = lf.run_experiment(
-        name=DATASET,
+        name=args.dataset,
         run_name=run_name,
         data=list(items),
         task=task,
@@ -102,7 +116,8 @@ def main() -> int:
         _get_searcher().close()
     except Exception:
         pass
-    return 1 if fails else 0
+    # Строгий регресс падает в CI; мягкий пул — нет (оценка в UI).
+    return 1 if (fails and not args.soft) else 0
 
 
 if __name__ == "__main__":

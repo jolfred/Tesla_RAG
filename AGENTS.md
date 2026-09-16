@@ -36,6 +36,9 @@ setsid nohup .venv/bin/python -m backend.indexer.indexer $(ls storage/posts/post
 .venv/bin/python -m backend.scripts.run_regression
 # подмножество кейсов: --ids commanders_hq,units_tesla
 # exit 1 при провале (для CI).
+# Пул вопросов (24 шт, мягкая оценка: Слой 1 + судья в UI):
+.venv/bin/python -m backend.scripts.run_regression --dataset question-pool --yaml backend/rag/question_pool.yaml --soft
+# импорт наборов: import_golden_to_langfuse.py [--source ... --dataset ...]
 
 # Скрапер (метаданные групп и посты VK)
 .venv/bin/python -m scraper.main --url-file storage/posts/group_links.txt --meta

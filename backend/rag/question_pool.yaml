@@ -1,0 +1,152 @@
+# Пул вопросов для проверки (оценочный, не строгий регресс).
+# Импорт: import_golden_to_langfuse.py --source backend/rag/question_pool.yaml
+#         --dataset question-pool
+# Прогон: run_regression.py --dataset question-pool --yaml backend/rag/question_pool.yaml
+# Оценка пула — глазами в UI + Слой 1 + судья: contains/excludes здесь только
+# там, где факт стабилен. expect_silence: true — правильный ответ «тишина».
+- id: pool_commanders_full
+  question: "Кто входит в командный состав штаба «Тесла»?"
+  expect_intent: commanders
+  contains: ["Астафьев", "Шарифуллин"]
+  excludes: []
+  notes: "Ядро: 8 человек, иерархия командир→комиссар→мастера→пресса"
+- id: pool_commanders_commissar
+  question: "Кто комиссар штаба Тесла?"
+  expect_intent: commanders
+  contains: ["Шарифуллин"]
+  excludes: []
+  notes: "Точечный вопрос по одной должности"
+- id: pool_commanders_short
+  question: "Кто командир Теслы?"
+  expect_intent: commanders
+  contains: ["Астафьев"]
+  excludes: []
+  notes: "Короткая форма, generic-имя — резолвится в HQ"
+- id: pool_commanders_2025
+  question: "Кто был командиром штаба в 2025 году?"
+  expect_intent: commanders
+  contains: []
+  excludes: []
+  notes: "Годовой срез: смотреть честную оговорку (упоминание vs назначение)"
+- id: pool_units_full
+  question: "Какие отряды входят в штаб СО КГЭУ «Тесла»?"
+  expect_intent: units
+  contains: ["Юность", "Дайнима"]
+  excludes: []
+  notes: "Чистый список без прозы, карточки направлений"
+- id: pool_units_dainima
+  question: "Что известно про отряд Дайнима?"
+  expect_intent: entity_detail
+  contains: ["Дайнима"]
+  excludes: []
+  notes: "Вопрос про конкретный отряд"
+- id: pool_events_2026
+  question: "Какие мероприятия были в начале 2026 года?"
+  expect_intent: events_in_period
+  contains: ["2026", "Погружение"]
+  excludes: []
+  notes: "Даты и ссылки обязательны"
+- id: pool_events_2025
+  question: "Что было у штаба в 2025 году?"
+  expect_intent: events_in_period
+  contains: []
+  excludes: []
+  notes: "Другой год — проверить фильтр периода"
+- id: pool_events_pogruzhenie
+  question: "Когда была школа «Погружение»?"
+  expect_intent: events_in_period
+  contains: ["Погружение"]
+  excludes: []
+  notes: "Точечное мероприятие, дата 2026-03-30"
+- id: pool_partners
+  question: "С кем сотрудничает штаб «Тесла»?"
+  expect_intent: partners
+  contains: ["КГЭУ"]
+  excludes: []
+  notes: "КГЭУ/РСО как партнёры — ок; внутренних пар быть не должно"
+- id: pool_partners_progresslab
+  question: "Что связывает штаб Тесла и ПрогрессLAB?"
+  expect_intent: partners
+  contains: []
+  excludes: []
+  notes: "Ловушка иерархии: создан на базе, но «входит в состав» — нет"
+- id: pool_person_astafiev
+  question: "Кто такой Даниил Астафьев?"
+  expect_intent: entity_detail
+  contains: ["Астафьев", "командир"]
+  excludes: []
+  notes: "Очерк: блок ролей + проза, поздравления выкинуты"
+- id: pool_person_sharifullin
+  question: "Кто такой Альфред Шарифуллин?"
+  expect_intent: entity_detail
+  contains: ["Шарифуллин"]
+  excludes: []
+  notes: "Второй очерк для сравнения стабильности формата"
+- id: pool_person_ostapenko
+  question: "Расскажи про Остапенко"
+  expect_intent: entity_detail
+  contains: ["Остапенко"]
+  excludes: []
+  notes: "Только фамилия — резолв персоны"
+- id: pool_members_dainima
+  question: "Кто состоит в отряде Дайнима?"
+  expect_intent: members
+  contains: []
+  excludes: []
+  notes: "Members-интент, редкий путь"
+- id: pool_winners
+  question: "Кто из штаба получал награды?"
+  expect_intent: winners
+  contains: []
+  excludes: []
+  notes: "Winners + атрибуция наград (п.13 промпта)"
+- id: pool_projects
+  question: "Какие проекты ведёт штаб Тесла?"
+  expect_intent: projects
+  contains: []
+  excludes: []
+  notes: "Projects-интент"
+- id: pool_locations
+  question: "Где базируется штаб Тесла?"
+  expect_intent: locations
+  contains: []
+  excludes: []
+  notes: "Locations-интент, данных может не быть"
+- id: pool_general_about
+  question: "Расскажи о штабе студенческих отрядов Тесла"
+  expect_intent: general
+  contains: ["Тесла"]
+  excludes: []
+  notes: "Общий вопрос — narrative по векторному контексту"
+- id: pool_general_what
+  question: "Чем занимается штаб СО КГЭУ?"
+  expect_intent: general
+  contains: []
+  excludes: []
+  notes: "Общий вопрос без имени Тесла"
+- id: pool_silence_person
+  question: "Кто такой Иван Несуществующий?"
+  expect_intent: entity_detail
+  contains: []
+  excludes: []
+  expect_silence: true
+  notes: "Правильный ответ — тишина, без выдуманной биографии"
+- id: pool_silence_squad
+  question: "Сколько человек в отряде «Невидимка»?"
+  expect_intent: units
+  contains: []
+  excludes: []
+  expect_silence: true
+  notes: "Несуществующий отряд — тишина, не ноль и не галлюцинация"
+- id: pool_hierarchy_trap
+  question: "ПрогрессLAB входит в состав штаба Тесла?"
+  expect_intent: partners
+  contains: []
+  excludes: ["входит в состав"]
+  notes: "Ловушка hierarchy_claim: прямого утверждения быть не должно"
+- id: pool_greeting
+  question: "Привет!"
+  expect_intent: general
+  contains: []
+  excludes: []
+  notes: "Мусорный вход — не падать, коротко ответить"
