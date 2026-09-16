@@ -1,7 +1,7 @@
-"""Тесты Фазы 3: rows_to_facts и _fmt_facts из Fact."""
+"""Тесты Фазы 3: rows_to_facts и fmt_facts из Fact."""
 
-from backend.rag.answer_generator import AnswerGenerator
 from backend.rag.facts import Fact, rows_to_facts, supersede_roles
+from backend.rag.renderers import fmt_facts
 
 
 def test_rows_to_facts_mapping():
@@ -26,7 +26,7 @@ def test_rows_to_facts_mapping():
 
 
 def test_fmt_prefers_role_title():
-    s = AnswerGenerator._fmt_facts([
+    s = fmt_facts([
         {"person": "Альфред Шарифуллин", "role_title": "Комиссар",
          "relation": "COMMANDED", "observed_at": "2026-02-19"},
     ])
@@ -36,7 +36,7 @@ def test_fmt_prefers_role_title():
 
 
 def test_fmt_keeps_legacy_date_and_links():
-    s = AnswerGenerator._fmt_facts([
+    s = fmt_facts([
         {"person": "X", "relation": "MEMBER_OF", "date": "2025-05-05"},
         {"event": "Погружение", "links": [{"date": "2026-01-01"}]},
     ])

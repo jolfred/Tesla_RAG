@@ -223,3 +223,94 @@ def render(intent: str, rows: list[dict], org_name: str) -> str | None:
     if fn is None:
         return None
     return fn(rows_to_facts(rows), org_name)
+
+
+def fmt_facts(graph_facts: list[dict]) -> str:
+    """Факты для LLM-контекста (одна точка правды — из Fact, не из dict).
+
+    Переехало из AnswerGenerator: форматирование — дело рендереров.
+    role_title — первичен: «Комиссар», а не голый тип связи COMMANDED.
+    """
+    facts = rows_to_facts(graph_facts)
+    if not facts:
+        return "Нет данных графа."
+    lines = []
+    for f in facts[:60]:
+        subj = f.person if f.person != "?" else (f.subject or f.label or "?")
+        rel = f.role_title or f.relation or ""
+        obj = f.org or ""
+        event_date = (f.event_date or "")[:10]
+        observed_at = (f.observed_at or "")[:10]
+        date = f.date
+        job = subj
+        if rel:
+            job += f" ({rel}"
+            if obj:
+                job += f": {obj}"
+            job += ")"
+        elif obj:
+            job += f" — {obj}"
+        # Честная семантика дат (пункт 6/10): «с <дата>» только при
+        # подтверждённом событии, иначе — «упоминание в посте от».
+        if event_date:
+            job += f" | с {event_date}"
+        elif observed_at:
+            job += f" (упоминание в посте от {observed_at})"
+        elif date:
+            job += f" | дата: {date}"
+        line = job
+        if f.status:
+            line += f" [{f.status}]"
+        if f.role_status == "former":
+            line += " [экс/бывший]"
+        if f.description:
+            line += f" — {f.description[:120]}"
+        if not (rel or obj or date) and f.links:
+            dates = sorted({l.get("date") for l in f.links if l.get("date")})
+            if dates:
+                line += f" | даты: {', '.join(d[:10] for d in dates[:5])}"
+        urls = []
+        if f.source_post_url:
+            urls.append(f.source_post_url)
+        for l in f.links or []:
+            u = l.get("source_post_url")
+            if u and u not in urls:
+                urls.append(u)
+        for s in f.sources or []:
+            if s and s not in urls:
+                urls.append(s)
+        if urls:
+            line += f" | источники: {', '.join(urls[:3])}"
+        lines.append("- " + line)
+    return "\n".join(lines)
+
+
+def fmt_edges(links: list) -> str:
+    if not links:
+        return ""
+    parts = []
+    for l in links:
+        rel = l.get("rel") or l.get("rtype") or ""
+        tgt = l.get("target") or l.get("target_id") or ""
+        event_date = (l.get("event_date") or "")[:10]
+        observed_at = (l.get("observed_at") or "")[:10]
+        date = l.get("date")
+        url = l.get("source_post_url")
+        part = f"{rel}{' → ' + tgt if tgt else ''}"
+        if event_date:
+            part += f" (с {event_date})"
+        elif observed_at:
+            part += f" (упом. {observed_at})"
+        elif date:
+            part += f" ({str(date)[:10]})"
+        if l.get("role_status") == "former":
+            part += " [экс]"
+        if url:
+            part += f" [{url}]"
+        parts.append(part)
+    return "; ".join(parts)
+
+
+def post_stamp(p: dict) -> str:
+    # Только дата без времени: сырые ISO-метки засоряют контекст и ответы.
+    return (p.get("published_at") or "")[:10]

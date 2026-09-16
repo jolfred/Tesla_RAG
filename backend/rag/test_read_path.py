@@ -4,8 +4,9 @@ import uuid
 from unittest.mock import MagicMock
 
 from backend.rag.answer_generator import AnswerGenerator
-from backend.rag.planner_queries import query_for_plan
-from backend.rag.searcher import (
+from backend.rag.planner_queries_legacy import query_for_plan
+from backend.rag.renderers import fmt_facts
+from backend.rag.search_utils import (
     _fact_date,
     question_year,
 )
@@ -56,7 +57,7 @@ def test_fact_date_priority():
 
 
 def test_fmt_facts_honest_dates():
-    s = AnswerGenerator._fmt_facts(
+    s = fmt_facts(
         [
             {"person": "Марсель", "relation": "COMMANDED", "event_date": "2026-04-01",
              "observed_at": "2026-04-01"},

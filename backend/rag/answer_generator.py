@@ -1,5 +1,5 @@
 from backend.config import LLM_PROVIDER
-from backend.rag.facts import Fact, rows_to_facts
+from backend.rag.renderers import fmt_edges, fmt_facts, post_stamp
 from backend.utils.gigachat_client import GigaChatClient
 from backend.utils.logger import setup_logger
 
@@ -53,93 +53,6 @@ class AnswerGenerator:
 
         return self._client
 
-    @staticmethod
-    def _fmt_facts(graph_facts: list[dict]) -> str:
-        # Фаза 3: форматируем из Fact (одна точка правды), не из сырого dict.
-        # role_title — первичен: «Комиссар», а не голый тип связи COMMANDED.
-        facts = rows_to_facts(graph_facts)
-        if not facts:
-            return "Нет данных графа."
-        lines = []
-        for f in facts[:60]:
-            subj = f.person if f.person != "?" else (f.subject or f.label or "?")
-            rel = f.role_title or f.relation or ""
-            obj = f.org or ""
-            event_date = (f.event_date or "")[:10]
-            observed_at = (f.observed_at or "")[:10]
-            date = f.date
-            job = subj
-            if rel:
-                job += f" ({rel}"
-                if obj:
-                    job += f": {obj}"
-                job += ")"
-            elif obj:
-                job += f" — {obj}"
-            # Честная семантика дат (пункт 6/10): «с <дата>» только при
-            # подтверждённом событии, иначе — «упоминание в посте от».
-            if event_date:
-                job += f" | с {event_date}"
-            elif observed_at:
-                job += f" (упоминание в посте от {observed_at})"
-            elif date:
-                job += f" | дата: {date}"
-            line = job
-            if f.status:
-                line += f" [{f.status}]"
-            if f.role_status == "former":
-                line += " [экс/бывший]"
-            if f.description:
-                line += f" — {f.description[:120]}"
-            if not (rel or obj or date) and f.links:
-                dates = sorted({l.get("date") for l in f.links if l.get("date")})
-                if dates:
-                    line += f" | даты: {', '.join(d[:10] for d in dates[:5])}"
-            urls = []
-            if f.source_post_url:
-                urls.append(f.source_post_url)
-            for l in f.links or []:
-                u = l.get("source_post_url")
-                if u and u not in urls:
-                    urls.append(u)
-            for s in f.sources or []:
-                if s and s not in urls:
-                    urls.append(s)
-            if urls:
-                line += f" | источники: {', '.join(urls[:3])}"
-            lines.append("- " + line)
-        return "\n".join(lines)
-
-    @staticmethod
-    def _fmt_edges(links: list) -> str:
-        if not links:
-            return ""
-        parts = []
-        for l in links:
-            rel = l.get("rel") or l.get("rtype") or ""
-            tgt = l.get("target") or l.get("target_id") or ""
-            event_date = (l.get("event_date") or "")[:10]
-            observed_at = (l.get("observed_at") or "")[:10]
-            date = l.get("date")
-            url = l.get("source_post_url")
-            part = f"{rel}{' → ' + tgt if tgt else ''}"
-            if event_date:
-                part += f" (с {event_date})"
-            elif observed_at:
-                part += f" (упом. {observed_at})"
-            elif date:
-                part += f" ({str(date)[:10]})"
-            if l.get("role_status") == "former":
-                part += " [экс]"
-            if url:
-                part += f" [{url}]"
-            parts.append(part)
-        return "; ".join(parts)
-
-    @staticmethod
-    def _post_stamp(p: dict) -> str:
-        # Только дата без времени: сырые ISO-метки засоряют контекст и ответы.
-        return (p.get("published_at") or "")[:10]
 
     def answer_entity_detail(
         self,
@@ -167,7 +80,7 @@ class AnswerGenerator:
         for p in (posts or [])[:6]:
             text = p.get("text") or ""
             post_lines.append(
-                f"- [{self._post_stamp(p)}] {p.get('group_name', '')}: "
+                f"- [{post_stamp(p)}] {p.get('group_name', '')}: "
                 f"{text[:400]} (URL: {p.get('post_url', '')})"
             )
         if post_lines:
@@ -231,7 +144,7 @@ class AnswerGenerator:
         sections = []
         blocks: dict[str, str] = {}
         if mode == "struct" and graph_facts:
-            facts_str = self._fmt_facts(graph_facts)
+            facts_str = fmt_facts(graph_facts)
             block = "=== ФАКТЫ ИЗ ГРАФА ЗНАНИЙ ===\n" + facts_str
             sections.append(block)
             blocks["graph"] = block
@@ -241,7 +154,7 @@ class AnswerGenerator:
                 node_id = f.get("id") or f.get("subject") or "?"
                 ntype = f.get("type") or ""
                 desc = f.get("description") or ""
-                links = self._fmt_edges(f.get("links") or [])
+                links = fmt_edges(f.get("links") or [])
                 line = f"- {node_id} [{ntype}]"
                 if desc:
                     line += f": {desc[:150]}"
@@ -267,7 +180,7 @@ class AnswerGenerator:
                     )
                 else:
                     post_lines.append(
-                        f"- [{self._post_stamp(p)}] {p.get('group_name', '')}: "
+                        f"- [{post_stamp(p)}] {p.get('group_name', '')}: "
                         f"{text[:400]} (URL: {p.get('post_url', '')})"
                     )
             block = header + "\n" + "\n".join(post_lines)
@@ -281,7 +194,7 @@ class AnswerGenerator:
             for p in source_posts[:6]:
                 text = p.get("text") or ""
                 src_lines.append(
-                    f"- [{self._post_stamp(p)}] {p.get('group_name', '')}: "
+                    f"- [{post_stamp(p)}] {p.get('group_name', '')}: "
                     f"{text[:2000]} (URL: {p.get('post_url', '')})"
                 )
             block = "=== ПОСТЫ-ИСТОЧНИКИ ФАКТОВ ===\n" + "\n".join(src_lines)

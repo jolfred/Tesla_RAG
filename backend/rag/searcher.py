@@ -1,20 +1,26 @@
 import json
-import re
 import uuid
 from pathlib import Path
 
 from backend.config import GIGACHAT_MODEL
 from backend.embeddings.vec_search import VectorSearcher
 from backend.observability import langfuse_client as _lf
+from backend.observability.checks import run_layer1 as _run_layer1
 from backend.rag import query_planner
 from backend.rag.answer_generator import ANSWER_PROMPT_VERSION, AnswerGenerator
+from backend.rag.entity_search import search_entity_detail
 from backend.rag.facts import rows_to_facts, supersede_roles
 from backend.rag.graph_planner import GraphPlanner
-from backend.rag.planner_queries import person_roles_query
 from backend.rag.renderers import (
     render,
     render_commanders,
-    render_person_roles,
+)
+from backend.rag.search_utils import (
+    _fact_date,
+    _filter_posts_by_period,
+    _fmt_call_window,
+    narrative_repeats_list,
+    question_year,
 )
 from backend.rag.units_enrich import (
     enrich_units,
@@ -24,118 +30,6 @@ from backend.rag.units_enrich import (
 from backend.utils.logger import setup_logger
 
 logger = setup_logger("searcher")
-
-_YEAR_RE = re.compile(r"(?:19|20)\d{2}")
-_BULLET_RE = re.compile(r"^\s*(?:•|[-*]|\d+[.)])\s+")
-_CONGRATS_RE = re.compile(r"дн[её]м рождения|поздравля|happy birthday", re.IGNORECASE)
-_DATE_HINT_RE = re.compile(r"(?:19|20)\d{2}|\d{1,2}[.\-]\d{1,2}[.\-]\d{2,4}")
-
-
-def _fmt_call_window(exchanges: list[dict], extra: str = "") -> str:
-    """Одно окно вызова: полные тексты запроса и ответа (fidelity).
-
-    Ретраи складываются стопкой с заголовками попыток. Ничего не режется.
-    """
-    parts = []
-    for i, ex in enumerate(exchanges):
-        if len(exchanges) > 1:
-            parts.append(f"--- попытка {i + 1} ---")
-        for m in ex.get("messages") or []:
-            parts.append(f"=== {str(m.get('role', '')).upper()} ===\n{m.get('content', '')}")
-        parts.append(f"=== ОТВЕТ ===\n{ex.get('response', '')}")
-    if extra:
-        parts.append(extra)
-    return "\n\n".join(parts) if parts else "— вызовов не было —"
-
-
-def narrative_repeats_list(graph_facts: list[dict], answer: str,
-                           structured: str | None) -> bool:
-    """Проза дублирует блок (п.1 отзыва): прозу выкинуть.
-
-    Два триггера: (а) список — ≥2 буллетов с именами, покрывающих
-    ≥ половины имён; (б) пересказ без добавленной стоимости — от 3 имён,
-    большинство упомянуто и ни одной даты (проза ничего не добавила).
-    Очерк об одном человеке (1–2 имени) никогда не давим: упоминание
-    имени там естественно. Абзац с датами — не дубль, пропускаем.
-    """
-    prose = (answer[len(structured):]
-             if structured and answer.startswith(structured) else answer)
-    if not prose.strip():
-        return False
-    names = set()
-    for f in rows_to_facts(graph_facts or []):
-        for v in (f.person, f.subject, f.label):
-            if v and v != "?" and len(v) > 2:
-                names.add(v.lower())
-    if not names:
-        return False
-    lowered = prose.lower()
-    mentioned = {n for n in names if n in lowered}
-    if len(mentioned) * 2 < len(names):
-        return False
-    named_bullets = sum(
-        1 for ln in prose.splitlines()
-        if _BULLET_RE.match(ln) and any(n in ln.lower() for n in names)
-    )
-    if named_bullets >= 2:
-        return True
-    # Пересказ без дат: от 3 имён, большинство упомянуто, информации
-    # не добавлено (ровно половина — пограничный случай, пропускаем).
-    return (len(names) >= 3 and len(mentioned) * 2 > len(names)
-            and _DATE_HINT_RE.search(prose) is None)
-
-
-def question_year(question: str) -> str | None:
-    """Единственный год из вопроса (п.8) — для фильтра на всех путях."""
-    years = sorted(set(_YEAR_RE.findall(question or "")))
-    return years[0] if len(years) == 1 else None
-
-
-def _fact_date(f: dict) -> str:
-    """Дата факта для сортировки (п.10): сначала event_date, при отсутствии —
-    observed_at/date. Свежее важнее, но дата события бьёт дату упоминания."""
-    events, mentions = [], []
-
-    def _add(d, bucket):
-        if d:
-            bucket.append((d or "")[:10])
-
-    _add(f.get("event_date"), events)
-    _add(f.get("observed_at"), mentions)
-    _add(f.get("date"), mentions)
-    for link in f.get("links") or []:
-        if isinstance(link, dict):
-            _add(link.get("event_date"), events)
-            _add(link.get("observed_at"), mentions)
-            _add(link.get("date"), mentions)
-    pool = events or mentions
-    return max(pool) if pool else ""
-
-
-def _filter_posts_by_period(
-    posts: list[dict], start: str | None, end: str | None
-) -> list[dict]:
-    """Оставить посты внутри [start, end] (ISO). Карточки group:// — всегда."""
-    if not start and not end:
-        return posts
-    kept = []
-    for p in posts:
-        url = p.get("post_url") or ""
-        if url.startswith("group://"):
-            kept.append(p)
-            continue
-        pub = (p.get("published_at") or "")[:10]
-        if not pub:
-            kept.append(p)
-            continue
-        if start and pub < start[:10]:
-            continue
-        if end and pub > end[:10]:
-            continue
-        kept.append(p)
-    return kept
-
-
 COMMUNITIES_PATH = (
     Path(__file__).resolve().parent.parent.parent / "storage" / "communities.json"
 )
@@ -425,8 +319,8 @@ class GraphRAGSearcher:
         year_period = (f"{year}-01-01", f"{year}-12-31") if year else (None, None)
 
         if plan.intent == "entity_detail" and plan.target_name:
-            return self._search_v2_entity(
-                question, plan, top_k, include_context, plan_sink,
+            return search_entity_detail(
+                self, question, plan, top_k, include_context, plan_sink,
                 year_period, root)
 
         if mode in ("struct", "local"):
@@ -607,7 +501,6 @@ class GraphRAGSearcher:
             "posts_used": len(posts) + len(source_posts),
             "llm_calls": llm_calls,
         })
-        from backend.observability.checks import run_layer1 as _run_layer1
         _run_layer1(trace_id, answer, graph_facts)
 
         if include_context:
@@ -649,110 +542,6 @@ class GraphRAGSearcher:
             "trace_id": trace_id,
             "calls": calls,
             # Сколько LLM-вызовов ушло на вопрос.
-            "llm_calls": llm_calls,
-        }
-
-    def _search_v2_entity(
-        self, question, plan, top_k, include_context, plan_sink,
-        year_period, root,
-    ) -> dict:
-        """Фаза 5: entity_detail — структурный блок ролей + LLM-абзац раздельно."""
-        answer_sink: list = []
-        graph = self._get_planner()._get_graph()
-        rows: list = []
-        if graph is not None:
-            candidate = person_roles_query(plan.target_name or "")
-            if candidate is not None:
-                query, params = candidate
-                try:
-                    with _lf.observation(
-                        "cypher_exec", as_type="retriever",
-                        input={"query": query, "params": params},
-                    ) as sp:
-                        rows = graph.search_cypher(query, params)
-                        sp.update(output={"facts_count": len(rows)})
-                except Exception as e:
-                    logger.warning("v2 person roles failed: %s", e)
-        try:
-            rows.sort(key=_fact_date, reverse=True)
-        except Exception:
-            pass
-        structured = render_person_roles(
-            supersede_roles(rows_to_facts(rows)), plan.target_name or "?")
-        source_posts = self._resolve_source_posts(rows) if rows else []
-        try:
-            with _lf.observation(
-                "vector_search", as_type="retriever",
-                input={"question": question, "top_k": 5,
-                       "reason": "entity_detail"},
-            ) as sp:
-                posts = self._get_vec().search(question, top_k=5)
-                sp.update(output={
-                    "posts_count": len(posts),
-                    "urls": [p.get("post_url") for p in posts[:10]],
-                })
-        except Exception as e:
-            logger.warning("Vector search failed: %s", e)
-            posts = []
-        if year_period[0] or year_period[1]:
-            posts = _filter_posts_by_period(posts, *year_period)
-        # Поздравления — не биография (п.5 отзыва): выкидываем из контекста
-        # нарратива полностью. Осталась пустота — проза по одним фактам.
-        narrative_posts = [p for p in source_posts + posts
-                           if not _CONGRATS_RE.search(p.get("text") or "")]
-        with _lf.observation(
-            "llm_answer", as_type="generation", model=GIGACHAT_MODEL,
-            input={"question": question,
-                   "facts_block": ("=== ФАКТЫ ===\n" + structured
-                                   if structured else None)},
-        ) as gen:
-            answer, blocks = self._get_answer_gen().answer_entity_detail(
-                question, structured, narrative_posts,
-                trace_sink=answer_sink,
-                facts_block=("=== ФАКТЫ ===\n" + structured
-                             if structured else None),
-            )
-            gen.update(
-                output=answer,
-                usage_details=self._lf_usage(question, answer),
-            )
-        if structured and narrative_repeats_list(
-                rows, answer, structured):
-            logger.warning("Entity narrative repeats list, dropping prose")
-            answer, blocks = structured, {}
-        sources = self._collect_sources("local", rows, source_posts, posts)
-        if include_context:
-            calls = [
-                {"title": "Вызов 1 — план (v2)",
-                 "text": _fmt_call_window(plan_sink,
-                        f"=== ПЛАН ===\n{json.dumps(plan.to_dict(), ensure_ascii=False, indent=2)}")},
-                {"title": "Вызов 2 — ответ", "text": _fmt_call_window(answer_sink)},
-            ]
-        else:
-            calls = None
-        llm_calls = plan.llm_calls + len(answer_sink)
-        trace_id = _lf.current_trace_id()
-        root.update(output=answer, metadata={
-            "intent": plan.intent, "mode": "local", "kind": plan.kind,
-            "target_name": plan.target_name,
-            "prompt_version": ANSWER_PROMPT_VERSION,
-            "facts_count": len(rows),
-            "posts_used": len(posts) + len(source_posts),
-            "llm_calls": llm_calls,
-        })
-        from backend.observability.checks import run_layer1 as _run_layer1
-        _run_layer1(trace_id, answer, rows)
-        return {
-            "answer": answer,
-            "sources": sources,
-            "media": [],
-            "mode": "local",
-            "facts_count": len(rows),
-            "posts_used": len(posts) + len(source_posts),
-            "context": blocks if include_context else None,
-            "trace": None,
-            "trace_id": trace_id,
-            "calls": calls,
             "llm_calls": llm_calls,
         }
 

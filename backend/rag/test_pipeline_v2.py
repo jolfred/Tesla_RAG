@@ -208,7 +208,7 @@ def test_v2_entity_detail_path(monkeypatch):
 
 
 def test_narrative_repeats_list_guard():
-    from backend.rag.searcher import narrative_repeats_list
+    from backend.rag.search_utils import narrative_repeats_list
 
     facts = [
         {"person": "Иван Петров", "role_title": "Командир"},
