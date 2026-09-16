@@ -1,12 +1,11 @@
 import json
-import os
 import re
 import uuid
 from pathlib import Path
 
 from backend.embeddings.vec_search import VectorSearcher
 from backend.rag import query_planner
-from backend.rag.answer_generator import ANSWER_PROMPT_VERSION, AnswerGenerator
+from backend.rag.answer_generator import AnswerGenerator
 from backend.rag.facts import rows_to_facts, supersede_roles
 from backend.rag.graph_planner import GraphPlanner
 from backend.rag.planner_queries import person_roles_query
@@ -20,14 +19,9 @@ from backend.rag.units_enrich import (
     parse_unit_directions,
     render_units_enriched,
 )
-from backend.observability.store import TraceStore
-from backend.observability.tracing import Trace, estimate_tokens
-from backend.observability.checks import run_layer1
 from backend.utils.logger import setup_logger
 
 logger = setup_logger("searcher")
-
-TRACING_ENABLED = os.getenv("TESLA_TRACING_ENABLED", "1") == "1"
 
 _YEAR_RE = re.compile(r"(?:19|20)\d{2}")
 _BULLET_RE = re.compile(r"^\s*(?:•|[-*]|\d+[.)])\s+")
@@ -87,14 +81,6 @@ def narrative_repeats_list(graph_facts: list[dict], answer: str,
     # не добавлено (ровно половина — пограничный случай, пропускаем).
     return (len(names) >= 3 and len(mentioned) * 2 > len(names)
             and _DATE_HINT_RE.search(prose) is None)
-
-
-def _sink_tokens(sink: list) -> tuple[int, int]:
-    """Грубая оценка токенов обменов (фолбэк, когда API не отдал usage)."""
-    tin = sum(estimate_tokens(m.get("content", ""))
-              for ex in sink for m in ex.get("messages") or [])
-    tout = sum(estimate_tokens(ex.get("response", "")) for ex in sink)
-    return tin, tout
 
 
 def question_year(question: str) -> str | None:
@@ -388,57 +374,21 @@ class GraphRAGSearcher:
                     sources.append(src)
         return sources
 
-    def _new_trace(self, question: str, source: str) -> Trace:
-        store = None
-        if TRACING_ENABLED:
-            try:
-                store = TraceStore()
-            except Exception as e:
-                logger.warning("Tracing disabled: %s", e)
-        return Trace(store, question, source)
-
-    @staticmethod
-    def _extractor_versions(rows: list) -> str | None:
-        versions = sorted({r.get("prompt_version") for r in rows or []
-                           if r.get("prompt_version")})
-        return ",".join(versions) or None
-
-    def _answer_tokens(self, answer_sink: list) -> tuple[int, int]:
-        """Токены ответа: usage клиента, иначе оценка по обменам."""
-        try:
-            usage = self._get_answer_gen().last_usage or {}
-            tin, tout = usage.get("prompt_tokens"), usage.get("completion_tokens")
-            if tin is not None or tout is not None:
-                return tin or 0, tout or 0
-        except Exception:
-            pass
-        return _sink_tokens(answer_sink)
-
-    def search(self, question: str, top_k: int = 8,
-               include_context: bool = False,
-               source: str = "prod") -> dict:
+    def search(self, question: str, top_k: int = 8, include_context: bool = False) -> dict:
         """Единый путь: classify+plan, диспетчер enumerable/narrative.
 
         enumerable + факты -> шаблон (0 LLM-вызовов на ответе);
         шаблон пуст -> vector-fallback -> LLM; оба пусты -> тишина без LLM.
-        source: prod | regression | manual_test (пишется в трейс).
         """
         logger.info("GraphRAG search: '%s'", question)
-        trace = self._new_trace(question, source)
         plan_sink: list = []
         answer_sink: list = []
 
-        with trace.span("classify_and_plan", {"question": question}) as sp:
-            plan = query_planner.classify_and_plan(
-                question,
-                graph=self._get_planner()._get_graph(),
-                trace_sink=plan_sink,
-            )
-            tin, tout = _sink_tokens(plan_sink)
-            trace.add_tokens(tin + tout)
-            sp.set_output({**plan.to_dict(), "llm_calls": plan.llm_calls},
-                          model="gen_ai.request.model=gigachat",
-                          tokens_in=tin, tokens_out=tout)
+        plan = query_planner.classify_and_plan(
+            question,
+            graph=self._get_planner()._get_graph(),
+            trace_sink=plan_sink,
+        )
         mode = plan.mode
         logger.info("plan: intent=%s mode=%s kind=%s org=%s",
                     plan.intent, mode, plan.kind, plan.org_norm_id)
@@ -448,27 +398,21 @@ class GraphRAGSearcher:
         source_posts: list = []
         communities: list = []
         plan_debug: dict = {}
-        used_vector_fallback = False
 
         year = question_year(question)
         year_period = (f"{year}-01-01", f"{year}-12-31") if year else (None, None)
 
         if plan.intent == "entity_detail" and plan.target_name:
             return self._search_v2_entity(
-                question, plan, top_k, include_context, plan_sink, year_period,
-                trace, source)
+                question, plan, top_k, include_context, plan_sink, year_period)
 
         if mode in ("struct", "local"):
-            with trace.span("cypher_exec", {"intent": plan.intent}) as sp:
-                try:
-                    graph_facts, plan_debug = self._get_planner().execute_v2(
-                        plan.to_dict()
-                    )
-                except Exception as e:
-                    logger.warning("v2 planner execution failed: %s", e)
-                sp.set_output({"n_rows": len(graph_facts),
-                               "cypher": (plan_debug or {}).get("cypher"),
-                               "params": (plan_debug or {}).get("params", {})})
+            try:
+                graph_facts, plan_debug = self._get_planner().execute_v2(
+                    plan.to_dict()
+                )
+            except Exception as e:
+                logger.warning("v2 planner execution failed: %s", e)
             try:
                 graph_facts.sort(key=_fact_date, reverse=True)
             except Exception:
@@ -482,15 +426,10 @@ class GraphRAGSearcher:
                 except Exception as e:
                     logger.warning("Group card resolve failed: %s", e)
             else:
-                with trace.span("vector_search",
-                                {"question": question, "top_k": 5,
-                                 "reason": "graph_empty_fallback"}) as sp:
-                    try:
-                        posts = self._get_vec().search(question, top_k=5)
-                    except Exception as e:
-                        logger.warning("Vector fallback failed: %s", e)
-                    sp.set_output({"n_posts": len(posts)})
-                used_vector_fallback = bool(posts)
+                try:
+                    posts = self._get_vec().search(question, top_k=5)
+                except Exception as e:
+                    logger.warning("Vector fallback failed: %s", e)
             if mode == "struct":
                 pstart = plan.period_start or year_period[0]
                 pend = plan.period_end or year_period[1]
@@ -509,14 +448,10 @@ class GraphRAGSearcher:
         elif mode == "global":
             communities = self._load_communities()
         else:  # basic
-            with trace.span("vector_search",
-                            {"question": question, "top_k": top_k,
-                             "reason": "basic"}) as sp:
-                try:
-                    posts = self._get_vec().search(question, top_k=top_k)
-                except Exception as e:
-                    logger.warning("Vector search failed: %s", e)
-                sp.set_output({"n_posts": len(posts)})
+            try:
+                posts = self._get_vec().search(question, top_k=top_k)
+            except Exception as e:
+                logger.warning("Vector search failed: %s", e)
             if year_period[0] or year_period[1]:
                 posts = _filter_posts_by_period(posts, *year_period)
 
@@ -548,20 +483,13 @@ class GraphRAGSearcher:
                 # Стиль Летописи всем шаблонам (п.3–4 отзыва): детерминированный
                 # блок фактов + живой нарратив. Факты не выдумываются.
                 # LLM легла — answer_entity_detail вернёт голый шаблон.
-                with trace.span("llm_answer",
-                                {"intent": plan.intent,
-                                 "kind": "template_narrative"}) as sp:
-                    narrative_answer, narrative_blocks = (
-                        self._get_answer_gen().answer_entity_detail(
-                            question, structured, source_posts + posts,
-                            trace_sink=answer_sink,
-                            facts_block="=== ФАКТЫ ===\n" + structured,
-                        )
+                narrative_answer, narrative_blocks = (
+                    self._get_answer_gen().answer_entity_detail(
+                        question, structured, source_posts + posts,
+                        trace_sink=answer_sink,
+                        facts_block="=== ФАКТЫ ===\n" + structured,
                     )
-                    tin, tout = self._answer_tokens(answer_sink)
-                    trace.add_tokens(tin + tout)
-                    sp.set_output({"answer_chars": len(narrative_answer or "")},
-                                  tokens_in=tin, tokens_out=tout)
+                )
                 if not (narrative_answer or "").strip():
                     narrative_answer = None
                 elif "в архивах нет данных" in (
@@ -589,39 +517,17 @@ class GraphRAGSearcher:
             blocks = {}
             answer_sink_note = "— без LLM (оба источника пусты) —"
         else:
-            with trace.span("llm_answer",
-                            {"mode": mode, "kind": "generate"}) as sp:
-                answer, blocks = self._get_answer_gen().generate(
-                    question,
-                    mode=mode,
-                    graph_facts=graph_facts,
-                    posts=posts,
-                    source_posts=source_posts,
-                    communities=communities,
-                    trace_sink=answer_sink,
-                )
-                tin, tout = self._answer_tokens(answer_sink)
-                trace.add_tokens(tin + tout)
-                sp.set_output({"answer_chars": len(answer or "")},
-                              tokens_in=tin, tokens_out=tout)
+            answer, blocks = self._get_answer_gen().generate(
+                question,
+                mode=mode,
+                graph_facts=graph_facts,
+                posts=posts,
+                source_posts=source_posts,
+                communities=communities,
+                trace_sink=answer_sink,
+            )
 
         sources = self._collect_sources(mode, graph_facts, source_posts, posts)
-
-        trace.event("render", {"intent": plan.intent, "kind": plan.kind},
-                    {"rendered": rendered is not None,
-                     "narrative": narrative_answer is not None})
-        trace.finish(
-            intent=plan.intent, mode=mode, kind=plan.kind,
-            org_filter_raw=plan.org_filter, org_norm_id=plan.org_norm_id,
-            n_facts=len(graph_facts),
-            used_vector_fallback=used_vector_fallback,
-            final_answer=answer,
-            prompt_version=ANSWER_PROMPT_VERSION,
-            extractor_prompt_version=self._extractor_versions(graph_facts),
-            total_llm_calls=plan.llm_calls + len(answer_sink),
-            **run_layer1(answer, graph_facts,
-                         len(posts) + len(source_posts)),
-        )
 
         if include_context:
             cypher = (plan_debug or {}).get("cypher")
@@ -662,12 +568,10 @@ class GraphRAGSearcher:
             "calls": calls,
             # Метрика Фазы 6: сколько LLM-вызовов ушло на вопрос.
             "llm_calls": plan.llm_calls + len(answer_sink),
-            "trace_id": trace.trace_id,
         }
 
     def _search_v2_entity(
-        self, question, plan, top_k, include_context, plan_sink, year_period,
-        trace, source="prod",
+        self, question, plan, top_k, include_context, plan_sink, year_period
     ) -> dict:
         """Фаза 5: entity_detail — структурный блок ролей + LLM-абзац раздельно."""
         answer_sink: list = []
@@ -677,14 +581,10 @@ class GraphRAGSearcher:
             candidate = person_roles_query(plan.target_name or "")
             if candidate is not None:
                 query, params = candidate
-                with trace.span("cypher_exec",
-                                {"intent": "entity_detail"}) as sp:
-                    try:
-                        rows = graph.search_cypher(query, params)
-                    except Exception as e:
-                        logger.warning("v2 person roles failed: %s", e)
-                    sp.set_output({"n_rows": len(rows), "cypher": query,
-                                   "params": params})
+                try:
+                    rows = graph.search_cypher(query, params)
+                except Exception as e:
+                    logger.warning("v2 person roles failed: %s", e)
         try:
             rows.sort(key=_fact_date, reverse=True)
         except Exception:
@@ -692,46 +592,26 @@ class GraphRAGSearcher:
         structured = render_person_roles(
             supersede_roles(rows_to_facts(rows)), plan.target_name or "?")
         source_posts = self._resolve_source_posts(rows) if rows else []
-        with trace.span("vector_search",
-                        {"question": question, "top_k": 5,
-                         "reason": "entity_detail"}) as sp:
-            try:
-                posts = self._get_vec().search(question, top_k=5)
-            except Exception as e:
-                logger.warning("Vector search failed: %s", e)
-                posts = []
-            sp.set_output({"n_posts": len(posts)})
+        try:
+            posts = self._get_vec().search(question, top_k=5)
+        except Exception as e:
+            logger.warning("Vector search failed: %s", e)
+            posts = []
         if year_period[0] or year_period[1]:
             posts = _filter_posts_by_period(posts, *year_period)
         # Поздравления — не биография (п.5 отзыва): выкидываем из контекста
         # нарратива полностью. Осталась пустота — проза по одним фактам.
         narrative_posts = [p for p in source_posts + posts
                            if not _CONGRATS_RE.search(p.get("text") or "")]
-        with trace.span("llm_answer",
-                        {"intent": "entity_detail",
-                         "kind": "structured_narrative"}) as sp:
-            answer, blocks = self._get_answer_gen().answer_entity_detail(
-                question, structured, narrative_posts, trace_sink=answer_sink,
-                facts_block=("=== ФАКТЫ ===\n" + structured if structured else None),
-            )
-            tin, tout = self._answer_tokens(answer_sink)
-            trace.add_tokens(tin + tout)
-            sp.set_output({"answer_chars": len(answer or "")},
-                          tokens_in=tin, tokens_out=tout)
+        answer, blocks = self._get_answer_gen().answer_entity_detail(
+            question, structured, narrative_posts, trace_sink=answer_sink,
+            facts_block=("=== ФАКТЫ ===\n" + structured if structured else None),
+        )
         if structured and narrative_repeats_list(
                 rows, answer, structured):
             logger.warning("Entity narrative repeats list, dropping prose")
             answer, blocks = structured, {}
         sources = self._collect_sources("local", rows, source_posts, posts)
-        trace.finish(
-            intent=plan.intent, mode="local", kind=plan.kind,
-            org_filter_raw=plan.org_filter, org_norm_id=plan.org_norm_id,
-            n_facts=len(rows), used_vector_fallback=False,
-            final_answer=answer, prompt_version=ANSWER_PROMPT_VERSION,
-            extractor_prompt_version=self._extractor_versions(rows),
-            total_llm_calls=plan.llm_calls + len(answer_sink),
-            **run_layer1(answer, rows, len(posts) + len(source_posts)),
-        )
         if include_context:
             calls = [
                 {"title": "Вызов 1 — план (v2)",
@@ -752,7 +632,6 @@ class GraphRAGSearcher:
             "trace": None,
             "calls": calls,
             "llm_calls": plan.llm_calls + len(answer_sink),
-            "trace_id": trace.trace_id,
         }
 
     def close(self):

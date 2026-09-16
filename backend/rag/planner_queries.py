@@ -318,8 +318,7 @@ def commanders_query_strict(plan: dict) -> Optional[tuple[str, dict]]:
         RETURN p.name AS person, r.role_title AS role_title, r.status AS status,
                 type(r) AS relation, r.date AS date, """ + _V3_PROPS + """,
                 r.description AS description,
-                r.source_post_url AS source_post_url,
-                r.prompt_version AS prompt_version
+                r.source_post_url AS source_post_url
         ORDER BY p.name
         LIMIT $limit
         """,
@@ -388,8 +387,7 @@ def partners_query_strict(plan: dict) -> Optional[tuple[str, dict]]:
         RETURN DISTINCT s.name AS subject, o.name AS partner,
                 r.date AS date, """ + _V3_PROPS + """,
                 r.description AS description,
-                r.source_post_url AS source_post_url,
-                r.prompt_version AS prompt_version
+                r.source_post_url AS source_post_url
         ORDER BY o.name
         LIMIT $limit
         """,
@@ -414,8 +412,7 @@ def person_roles_query(target_name: str) -> Optional[tuple[str, dict]]:
         RETURN p.name AS person, o.name AS org, r.role_title AS role_title,
                 type(r) AS relation, r.date AS date, """ + _V3_PROPS + """,
                 r.description AS description,
-                r.source_post_url AS source_post_url,
-                r.prompt_version AS prompt_version
+                r.source_post_url AS source_post_url
         ORDER BY o.name
         LIMIT 50
         """,

@@ -1,33 +1,35 @@
-"""Промахи пайплайна (миграция в стор трейсов, Фаза 1).
+"""Append-only журнал качества выдачи (Фаза 2/6 плана упрощения пайплайна).
 
-Тот же интерфейс, что раньше (log_zero_result), но пишет в таблицу
-quality_log внутри storage/traces.db, а не в отдельный JSONL.
-Старый файл storage/logs/quality_log.jsonl остаётся как история.
+Минимальная версия: каждый промах классификации/резолюции — одна JSON-строка
+в storage/logs/quality_log.jsonl. Еженедельный аудит — grep'ом по stage.
+Никакой БД и ротации на этом этапе: файл дешёвый, structured-логирование
+уже есть в backend/utils/logger.py для операционных событий.
 """
 
 from __future__ import annotations
 
-from backend.observability.store import TraceStore
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
 from backend.utils.logger import setup_logger
 
 logger = setup_logger("quality_log")
 
-_store: TraceStore | None = None
-
-
-def _get_store() -> TraceStore:
-    global _store
-    if _store is None:
-        try:
-            _store = TraceStore()
-        except Exception as e:
-            logger.warning("TraceStore unavailable: %s", e)
-            _store = None
-    return _store
+_LOG_PATH = Path(__file__).resolve().parent.parent.parent / "storage" / "logs" / "quality_log.jsonl"
 
 
 def log_zero_result(question: str, stage: str, detail: str = "") -> None:
     """Промах пайплайна: пустой результат или неразрешённая сущность."""
-    store = _get_store()
-    if store is not None:
-        store.log_quality(question, stage, detail)
+    entry = {
+        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "question": question,
+        "stage": stage,
+        "detail": detail,
+    }
+    try:
+        _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with _LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError as e:
+        logger.warning("quality_log write failed: %s", e)

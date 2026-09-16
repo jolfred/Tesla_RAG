@@ -69,10 +69,6 @@ class GigaChatClient:
         self._token = None
         self._token_expires_at = 0.0
         self._client = None
-        # Использование токенов последнего вызова (Фаза 1 наблюдаемости):
-        # {"prompt_tokens": int|None, "completion_tokens": int|None,
-        #  "total_tokens": int|None}. None = API не отдал usage.
-        self.last_usage: dict = {}
 
     def _fetch_token(self) -> str:
         if not GIGACHAT_AUTH_KEY:
@@ -138,19 +134,6 @@ class GigaChatClient:
         )
         content = response.choices[0].message.content
         result = (content or "").strip()
-        try:
-            usage = getattr(response, "usage", None)
-            if usage is not None:
-                dump = usage.model_dump() if hasattr(usage, "model_dump") else dict(usage)
-                self.last_usage = {
-                    "prompt_tokens": dump.get("prompt_tokens"),
-                    "completion_tokens": dump.get("completion_tokens"),
-                    "total_tokens": dump.get("total_tokens"),
-                }
-            else:
-                self.last_usage = {}
-        except Exception:
-            self.last_usage = {}
         if trace_sink is not None:
             trace_sink.append(
                 {
