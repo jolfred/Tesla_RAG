@@ -31,13 +31,11 @@ setsid nohup .venv/bin/python -m backend.indexer.indexer $(ls storage/posts/post
 # Тесты (моковые, сервисы не нужны)
 .venv/bin/python -m pytest backend/indexer/test_indexer.py
 
-# Бенчмарк RAG-ответов (нужны Neo4j + Qdrant + GigaChat; оценка 0/1/2 через GigaChat)
-.venv/bin/python -m backend.scripts.benchmark.runner --mode searcher
-# через HTTP API (uvicorn запущен на 8000):
-.venv/bin/python -m backend.scripts.benchmark.runner --mode api --api-url http://localhost:8000
-# только собрать ответы без оценки; подмножество тестов: --ids q1,q2
-# продолжение прерванного прогона (пропускает вопросы с ответом): --resume
-# Прогресс сохраняется инкрементально после каждого вопроса в storage/benchmark/report_latest.json.
+# Регресс RAG-ответов (нужны Neo4j + Qdrant + GigaChat + Langfuse;
+# golden-источник backend/rag/golden_set.yaml, прогоны — Experiment API)
+.venv/bin/python -m backend.scripts.run_regression
+# подмножество кейсов: --ids commanders_hq,units_tesla
+# exit 1 при провале (для CI).
 
 # Скрапер (метаданные групп и посты VK)
 .venv/bin/python -m scraper.main --url-file storage/posts/group_links.txt --meta

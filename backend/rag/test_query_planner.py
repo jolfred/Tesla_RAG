@@ -86,14 +86,14 @@ def test_resolve_exact_squad():
 
 
 def test_resolve_none_when_unknown(monkeypatch, tmp_path):
-    monkeypatch.setattr(qp.quality_log, "_LOG_PATH", tmp_path / "q.jsonl")
+
     g = FakeGraph([])
     assert qp.resolve_org_norm_id("Несуществующий", g) is None
     assert qp.resolve_org_norm_id("Тесла", None) is None
 
 
 def test_classify_and_plan_single_call(monkeypatch, tmp_path):
-    monkeypatch.setattr(qp.quality_log, "_LOG_PATH", tmp_path / "q.jsonl")
+
     g = FakeGraph(CANDS)
     sink: list = []
     plan = qp.classify_and_plan(
@@ -106,16 +106,16 @@ def test_classify_and_plan_single_call(monkeypatch, tmp_path):
     assert plan.llm_calls == 1 and len(sink) == 1
 
 
-def test_unknown_intent_falls_back(monkeypatch, tmp_path):
-    monkeypatch.setattr(qp.quality_log, "_LOG_PATH", tmp_path / "q.jsonl")
+def test_unknown_intent_falls_back(caplog):
+
     bad = dict(COMMANDERS_PAYLOAD, intent="teleport")
     plan = qp.classify_and_plan("???", graph=FakeGraph(CANDS), llm=FakeLLM(bad))
     assert (plan.intent, plan.mode) == ("general", "basic")
-    assert (tmp_path / "q.jsonl").exists()
+    assert "Unknown intent" in caplog.text
 
 
 def test_llm_failure_falls_back(monkeypatch, tmp_path):
-    monkeypatch.setattr(qp.quality_log, "_LOG_PATH", tmp_path / "q.jsonl")
+
     plan = qp.classify_and_plan("???", graph=None, llm=FakeLLM(fail=True))
     assert plan.intent == "general"
 
@@ -155,7 +155,7 @@ def test_query_for_plan_v2_dispatch():
 
 def test_regression_commanders_tesla_without_progresslab(monkeypatch, tmp_path):
     """Регресс Фазы 2: commanders('Тесла') — только штаб, без ПрогрессLAB."""
-    monkeypatch.setattr(qp.quality_log, "_LOG_PATH", tmp_path / "q.jsonl")
+
     hq_rows = [
         {"person": "Даниил Астафьев", "role_title": "Руководитель",
          "relation": "COMMANDED"},
@@ -236,7 +236,7 @@ def test_golden_intent_and_template(monkeypatch, tmp_path, payload, rows,
                                     expected, head):
     from backend.rag.renderers import render
 
-    monkeypatch.setattr(qp.quality_log, "_LOG_PATH", tmp_path / "q.jsonl")
+
     plan = qp.classify_and_plan(
         "вопрос", graph=FakeGraph(CANDS), llm=FakeLLM(payload))
     assert (plan.intent, plan.mode, plan.kind) == expected
@@ -245,7 +245,7 @@ def test_golden_intent_and_template(monkeypatch, tmp_path, payload, rows,
 
 
 def test_golden_narrative_intents(monkeypatch, tmp_path):
-    monkeypatch.setattr(qp.quality_log, "_LOG_PATH", tmp_path / "q.jsonl")
+
     g = FakeGraph(CANDS)
     ed = qp.classify_and_plan(
         "кто такой", graph=g,

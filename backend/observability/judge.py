@@ -14,7 +14,7 @@ import httpx
 
 import backend.config  # noqa: F401 — грузит .env (ключи Langfuse)
 from backend.observability import langfuse_client as _lf
-from backend.scripts.benchmark.graders import LLMGrader
+from backend.observability.graders import LLMGrader
 from backend.utils.logger import setup_logger
 
 logger = setup_logger("lf_judge")
@@ -85,7 +85,7 @@ def judge_trace(trace: dict, expected: str | None,
         logger.warning("trace %s: судья не вернул число: %r", tid[:8], res)
         return None
     _lf.score(tid, SCORE_NAME, value, data_type="NUMERIC",
-              comment=str(res.get("comment", ""))[:500])
+              comment=str(res.get("reason", ""))[:500])
     _lf.flush()
     logger.info("trace %s: %s=%s", tid[:8], SCORE_NAME, value)
     return {"trace_id": tid, "score": value}

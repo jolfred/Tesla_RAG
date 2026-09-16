@@ -22,7 +22,6 @@ org_norm_id — norm_id существующего узла или None.
 from __future__ import annotations
 
 from backend.common.canon import normalize_id
-from backend.rag import quality_log
 from backend.rag.query_schemas import (
     INTENT_SCHEMAS,
     INTENT_TO_KIND,
@@ -162,7 +161,6 @@ def classify_and_plan(
         logger.warning("classify_and_plan LLM failed: %s", e)
         if trace_sink is not None:
             trace_sink.extend(inner)
-        quality_log.log_zero_result(question, "classify", str(e)[:200])
         return QueryPlan(llm_calls=len(inner))
     if trace_sink is not None:
         trace_sink.extend(inner)
@@ -171,7 +169,6 @@ def classify_and_plan(
     schema = INTENT_SCHEMAS.get(intent)
     if schema is None:
         logger.warning("Unknown intent '%s', fallback to general", intent)
-        quality_log.log_zero_result(question, "classify", f"unknown intent: {intent}")
         return QueryPlan(llm_calls=len(inner))
     try:
         slots = schema.model_validate(
@@ -179,7 +176,6 @@ def classify_and_plan(
         )
     except Exception as e:
         logger.warning("Slot validation failed for %s: %s", intent, e)
-        quality_log.log_zero_result(question, "slots", f"{intent}: {e}"[:200])
         return QueryPlan(llm_calls=len(inner))
 
     limit = max(1, min(int(slots.limit) if getattr(slots, "limit", None) else 20, 100))
@@ -189,7 +185,7 @@ def classify_and_plan(
     org_filter = getattr(slots, "org_filter", None)
     org_norm_id = resolve_org_norm_id(org_filter, graph) if org_filter else None
     if org_filter and org_norm_id is None:
-        quality_log.log_zero_result(question, "resolve_org", org_filter)
+        logger.warning("org resolve failed for filter: %s", org_filter)
 
     return QueryPlan(
         intent=intent,
