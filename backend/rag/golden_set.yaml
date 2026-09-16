@@ -1,0 +1,28 @@
+# Golden-набор регресса (мигрирован в Langfuse Dataset `regression-golden-set`
+# скриптом backend/scripts/import_golden_to_langfuse.py; этот файл — исходник).
+- id: commanders_hq
+  question: "Кто входит в командный состав штаба «Тесла»?"
+  expect_intent: commanders
+  contains: ["Астафьев"]
+  excludes: ["В архивах нет данных"]
+- id: units_tesla
+  question: "Какие отряды входят в штаб СО КГЭУ «Тесла»?"
+  expect_intent: units
+  contains: []
+  excludes: ["В архивах нет данных"]
+- id: events_2026
+  question: "Какие мероприятия были в начале 2026 года?"
+  expect_intent: events_in_period
+  contains: ["2026"]
+  excludes: ["В архивах нет данных"]
+- id: partners_tesla
+  question: "С кем сотрудничает штаб «Тесла»?"
+  expect_intent: partners
+  contains: ["КГЭУ"]
+  excludes: ["В архивах нет данных"]
+- id: person_astafiev
+  question: "Кто такой Даниил Астафьев?"
+  expect_intent: entity_detail
+  contains: ["Астафьев"]
+  # Без excludes: очерк честно пишет, чего в архивах нет, — это не тишина.
+  excludes: []

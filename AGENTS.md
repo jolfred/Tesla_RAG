@@ -95,3 +95,12 @@ docker run --rm -v $PWD/frontend:/app -v graphrag_npm_cache:/root/.npm -w /app n
 - Логи фоновых задач: `storage/logs/*.log` (`index_all_gigachat.log`, `build_communities.log`, `api.log`).
 - Прогресс индексации: `grep -c "Processed post" storage/logs/index_all_gigachat.log`.
 - Статус: `curl -s http://localhost:8000/api/v1/status`.
+
+## Наблюдаемость (Langfuse, self-host :3000)
+
+- Стек: `docker compose -f docker-compose.langfuse.yml up -d` (web+worker+postgres+clickhouse+minio+redis, тома `lf_*`). UI: `http://localhost:3000`. Ключи создаются headless-инициализацией, лежат в `.env` (`LANGFUSE_*`, gitignored).
+- Критично: `LANGFUSE_MIGRATION_V4_WRITE_MODE=dual` (дефолт `events_only` не пишет legacy-таблицы — public API пуст); S3-region `us-east-1` (иначе 500 на ingest). SDK `langfuse==4.15.3`, API v4: `create_score` (не `score`), `as_type="retriever"` напрямую.
+- Код: `backend/observability/langfuse_client.py` (best-effort синглтон; токены — истина, GigaChat cost только Score `cost_rub`), `checks.py` (Слой 1 → Score), `judge.py` (LLMGrader → `faithfulness_llm`, только с эталоном), инструментация в `searcher.py` (answer/classify/cypher/vector/llm), `trace_id` в `ChatResponse`.
+- Регресс: `backend/rag/golden_set.yaml` (источник истины) → `scripts/import_golden_to_langfuse.py` → Dataset `regression-golden-set` → `scripts/run_regression.py` (Experiment API, exit 1 при провале).
+- Алерты: `scripts/check_langfuse_alerts.py` (exit 2; фильтр traceId API игнорирует — джойн в питоне; доставка в канал снаружи).
+- Тесты: `conftest.py` гасит Langfuse (`LANGFUSE_ENABLED=0`), иначе `.env` полезет в живой сервер.

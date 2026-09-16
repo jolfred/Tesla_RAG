@@ -39,6 +39,7 @@ async def chat(
             calls=[CallWindow(**c) for c in (result.get("calls") or [])]
             if want_context
             else None,
+            trace_id=result.get("trace_id"),
         )
     except Exception as e:
         logger.error(f"Chat error: {e}")

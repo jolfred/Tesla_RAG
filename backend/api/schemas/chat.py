@@ -28,3 +28,4 @@ class ChatResponse(BaseModel):
     facts_count: int = 0
     posts_used: int = 0
     calls: list[CallWindow] | None = None
+    trace_id: str | None = None
