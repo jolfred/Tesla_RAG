@@ -28,6 +28,42 @@ except Exception:
 
 COST_RUB_SCORE = "cost_rub"
 
+
+def _rate(name: str) -> float | None:
+    try:
+        v = os.getenv(name)
+        return float(v) if v else None
+    except (TypeError, ValueError):
+        return None
+
+
+def generation_cost(usage: dict | None,
+                    model: str | None) -> tuple[dict | None,
+                                                tuple[str, float] | None]:
+    """(cost_details, rub_score) для generation-наблюдения.
+
+    Тарифы — только из env (не выдумываем):
+      GIGACHAT_RUB_PER_1K_IN / _OUT — GigaChat, рубли → custom-Score;
+      PROXYAPI_USD_PER_1K_IN / _OUT — ProxyAPI, доллары → built-in cost.
+    Не заданы — (None, None), cost не пишем, токены остаются истиной.
+    """
+    if not usage:
+        return None, None
+    m = (model or "").lower()
+    tin = usage.get("input", 0) or 0
+    tout = usage.get("output", 0) or 0
+    if "gigachat" in m:
+        rin, rout = _rate("GIGACHAT_RUB_PER_1K_IN"), _rate("GIGACHAT_RUB_PER_1K_OUT")
+        if rin is None and rout is None:
+            return None, None
+        rub = tin / 1000 * (rin or 0) + tout / 1000 * (rout or 0)
+        return None, (COST_RUB_SCORE, rub)
+    rin, rout = _rate("PROXYAPI_USD_PER_1K_IN"), _rate("PROXYAPI_USD_PER_1K_OUT")
+    if rin is None and rout is None:
+        return None, None
+    return ({"input": tin / 1000 * (rin or 0),
+             "output": tout / 1000 * (rout or 0)}, None)
+
 _client = None
 _client_failed = False
 

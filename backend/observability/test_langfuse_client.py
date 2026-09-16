@@ -25,3 +25,30 @@ def test_usage_details_fallback_estimate():
 def test_usage_details_server_first():
     u = lf.usage_details({"input": 10, "output": 5}, "x", "y")
     assert u == {"input": 10, "output": 5}
+
+
+def test_generation_cost_no_tariffs(monkeypatch):
+    for v in ("GIGACHAT_RUB_PER_1K_IN", "GIGACHAT_RUB_PER_1K_OUT",
+              "PROXYAPI_USD_PER_1K_IN", "PROXYAPI_USD_PER_1K_OUT"):
+        monkeypatch.delenv(v, raising=False)
+    assert lf.generation_cost({"input": 10, "output": 5},
+                              "GigaChat-3-Ultra") == (None, None)
+    assert lf.generation_cost(None, "GigaChat-3-Ultra") == (None, None)
+
+
+def test_generation_cost_rub(monkeypatch):
+    monkeypatch.setenv("GIGACHAT_RUB_PER_1K_IN", "1.0")
+    monkeypatch.setenv("GIGACHAT_RUB_PER_1K_OUT", "2.0")
+    cost, rub = lf.generation_cost({"input": 1000, "output": 500},
+                                   "GigaChat-3-Ultra")
+    assert cost is None
+    assert rub == ("cost_rub", 2.0)
+
+
+def test_generation_cost_usd(monkeypatch):
+    monkeypatch.setenv("PROXYAPI_USD_PER_1K_IN", "1.0")
+    monkeypatch.setenv("PROXYAPI_USD_PER_1K_OUT", "2.0")
+    cost, rub = lf.generation_cost({"input": 1000, "output": 500},
+                                   "text-embedding-3-small")
+    assert rub is None
+    assert cost == {"input": 1.0, "output": 1.0}

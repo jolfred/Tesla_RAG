@@ -279,6 +279,18 @@ class GraphRAGSearcher:
             lu = None
         return _lf.usage_details(lu, prompt_text, completion_text)
 
+    def _lf_gen_update(self, gen, question, answer) -> None:
+        """usage + cost (тарифы из env, нет тарифов — только токены)."""
+        usage = self._lf_usage(question, answer)
+        kw: dict = {"output": answer, "usage_details": usage}
+        cost, rub = _lf.generation_cost(usage, GIGACHAT_MODEL)
+        if cost is not None:
+            kw["cost_details"] = cost
+        gen.update(**kw)
+        if rub is not None:
+            _lf.score(_lf.current_trace_id(), rub[0], rub[1],
+                      data_type="NUMERIC")
+
     def search(self, question: str, top_k: int = 8, include_context: bool = False) -> dict:
         """Единый путь: classify+plan, диспетчер enumerable/narrative.
 
@@ -400,9 +412,9 @@ class GraphRAGSearcher:
         rendered = None
         narrative_answer = None
         narrative_blocks: dict = {}
+        structured = None
         if plan.kind == "enumerable" and mode == "struct" and graph_facts:
             org_name = plan.org_filter or plan.org_norm_id or "архив"
-            structured = None
             if plan.intent == "commanders":
                 # Одно кресло — один действующий (без имён, только даты).
                 # Старый состав гаснет сам, когда приходит новый.
@@ -437,11 +449,7 @@ class GraphRAGSearcher:
                             facts_block="=== ФАКТЫ ===\n" + structured,
                         )
                     )
-                    gen.update(
-                        output=narrative_answer,
-                        usage_details=self._lf_usage(
-                            question, narrative_answer),
-                    )
+                    self._lf_gen_update(gen, question, narrative_answer)
                 if not (narrative_answer or "").strip():
                     narrative_answer = None
                 elif "в архивах нет данных" in (
@@ -484,10 +492,7 @@ class GraphRAGSearcher:
                     communities=communities,
                     trace_sink=answer_sink,
                 )
-                gen.update(
-                    output=answer,
-                    usage_details=self._lf_usage(question, answer),
-                )
+                self._lf_gen_update(gen, question, answer)
 
         sources = self._collect_sources(mode, graph_facts, source_posts, posts)
 
@@ -501,7 +506,9 @@ class GraphRAGSearcher:
             "posts_used": len(posts) + len(source_posts),
             "llm_calls": llm_calls,
         })
-        _run_layer1(trace_id, answer, graph_facts)
+        _ctx = ([structured] if structured else []) + [
+            (p.get("text") or "") for p in (source_posts + posts)]
+        _run_layer1(trace_id, answer, graph_facts, _ctx)
 
         if include_context:
             cypher = (plan_debug or {}).get("cypher")

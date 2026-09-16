@@ -27,6 +27,19 @@ _HIERARCHY_EVIDENCE_RELS = {"PART_OF", "MEMBER_OF"}
 _EMPTY_RE = re.compile(r"в архивах нет данных", re.IGNORECASE)
 
 
+def _dates_in_text(text: str | None) -> tuple[set[str], set[str]]:
+    """(полные даты ISO, годы) из произвольного текста."""
+    full, years = set(), set()
+    for m in _ISO_RE.finditer(text or ""):
+        full.add(m.group(0))
+        years.add(m.group(1))
+    for m in _DMY_RE.finditer(text or ""):
+        years.add(m.group(3))
+    for m in _YEAR_RE.finditer(text or ""):
+        years.add(m.group(1))
+    return full, years
+
+
 def _fact_dates(facts: list[dict]) -> tuple[set[str], set[str]]:
     """(полные даты ISO, годы) из строк фактов."""
     full, years = set(), set()
@@ -50,9 +63,21 @@ def _fact_dates(facts: list[dict]) -> tuple[set[str], set[str]]:
     return full, years
 
 
-def check_groundedness_of_dates(answer: str, facts: list[dict]) -> bool:
-    """Каждая дата/год в ответе подтверждается датами фактов."""
+def check_groundedness_of_dates(answer: str, facts: list[dict],
+                                context_texts: list[str] | None = None) -> bool:
+    """Каждая дата/год в ответе подтверждается фактами или контекстом,
+    который получила модель (блок фактов + тексты постов).
+
+    Модель цитирует не только строки графа: год истории штаба из карточки
+    группы — не галлюцинация, если он был в её контексте. Ловит только
+    выдуманные из ниоткуда даты. Точные ISO-даты строже bare-годов лишь
+    тем, что требуют полного совпадения, а не года.
+    """
     full, years = _fact_dates(facts)
+    for t in context_texts or []:
+        f2, y2 = _dates_in_text(t)
+        full |= f2
+        years |= y2
     for m in _ISO_RE.finditer(answer or ""):
         if m.group(0) not in full:
             return False
@@ -84,10 +109,12 @@ def check_empty_but_confident(facts: list[dict], answer: str) -> bool:
     return False
 
 
-def run_layer1(trace_id: str | None, answer: str, facts: list[dict]) -> dict:
+def run_layer1(trace_id: str | None, answer: str, facts: list[dict],
+               context_texts: list[str] | None = None) -> dict:
     """Все три проверки → Score на трейс. Возвращает {имя: bool}."""
     results = {
-        "date_groundedness": check_groundedness_of_dates(answer, facts),
+        "date_groundedness": check_groundedness_of_dates(
+            answer, facts, context_texts),
         "hierarchy_claim_ok": check_hierarchy_claim(answer, facts),
         "empty_but_confident_ok": check_empty_but_confident(facts, answer),
     }

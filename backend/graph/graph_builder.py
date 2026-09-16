@@ -4,6 +4,28 @@ from backend.utils.logger import setup_logger
 
 logger = setup_logger("graph_builder")
 
+import logging
+
+
+class _EventDateNoticeFilter(logging.Filter):
+    """Глушит известное безвредное уведомление Neo4j.
+
+    Строгие запросы читают r.event_date, которого нет на старых рёбрах
+    (null — норма, см. planner_common._V3_PROPS). Сервер шлёт WARNING
+    на каждый такой запрос — спам без пользы. Глушим ТОЛЬКО это
+    уведомление по точному тексту; остальные проходят.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        return "property `event_date` does not exist" not in msg
+
+
+logging.getLogger("neo4j").addFilter(_EventDateNoticeFilter())
+
 
 class GraphBuilder:
     def __init__(self):

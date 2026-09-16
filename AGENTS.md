@@ -102,3 +102,5 @@ docker run --rm -v $PWD/frontend:/app -v graphrag_npm_cache:/root/.npm -w /app n
 - Регресс: `backend/rag/golden_set.yaml` (источник истины) → `scripts/import_golden_to_langfuse.py` → Dataset `regression-golden-set` → `scripts/run_regression.py` (Experiment API, exit 1 при провале).
 - Алерты: `scripts/check_langfuse_alerts.py` (exit 2; фильтр traceId API игнорирует — джойн в питоне; доставка в канал снаружи).
 - Тесты: `conftest.py` гасит Langfuse (`LANGFUSE_ENABLED=0`), иначе `.env` полезет в живой сервер.
+- Рестарт API: `scripts/restart_api.sh` (PID-файл; `pkill -f` убивает собственный шелл).
+- Cost: только из env (`GIGACHAT_RUB_PER_1K_IN/_OUT`, `PROXYAPI_USD_PER_1K_IN/_OUT`); не заданы — только токены.

@@ -18,6 +18,21 @@ def test_dates_no_dates_in_answer_ok():
                                               [{"observed_at": None}]) is True
 
 
+def test_dates_year_from_context_ok():
+    # Год из контекста модели (карточка группы), не из строк графа, —
+    # не галлюцинация.
+    facts = [{"observed_at": "2026-03-31"}]
+    assert checks.check_groundedness_of_dates(
+        "Объединение работает с 2015 года", facts,
+        ["история: объединение работает с 2015 года"]) is True
+
+
+def test_dates_invented_iso_fail_despite_context():
+    facts = [{"observed_at": "2026-03-31"}]
+    assert checks.check_groundedness_of_dates(
+        "Событие 2026-03-30 прошло", facts, ["пост без дат"]) is False
+
+
 def test_hierarchy_no_claim_ok():
     assert checks.check_hierarchy_claim("Обычный ответ", []) is True
 

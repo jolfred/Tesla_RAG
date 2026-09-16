@@ -83,10 +83,7 @@ def search_entity_detail(searcher, question, plan, top_k, include_context,
             facts_block=("=== ФАКТЫ ===\n" + structured
                          if structured else None),
         )
-        gen.update(
-            output=answer,
-            usage_details=searcher._lf_usage(question, answer),
-        )
+        searcher._lf_gen_update(gen, question, answer)
     if structured and narrative_repeats_list(
             rows, answer, structured):
         logger.warning("Entity narrative repeats list, dropping prose")
@@ -111,7 +108,9 @@ def search_entity_detail(searcher, question, plan, top_k, include_context,
         "posts_used": len(posts) + len(source_posts),
         "llm_calls": llm_calls,
     })
-    run_layer1(trace_id, answer, rows)
+    run_layer1(trace_id, answer, rows,
+               ([structured] if structured else [])
+               + [p.get("text") or "" for p in narrative_posts])
     return {
         "answer": answer,
         "sources": sources,
