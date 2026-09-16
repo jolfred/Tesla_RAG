@@ -3,9 +3,11 @@ import re
 import uuid
 from pathlib import Path
 
+from backend.config import GIGACHAT_MODEL
 from backend.embeddings.vec_search import VectorSearcher
+from backend.observability import langfuse_client as _lf
 from backend.rag import query_planner
-from backend.rag.answer_generator import AnswerGenerator
+from backend.rag.answer_generator import ANSWER_PROMPT_VERSION, AnswerGenerator
 from backend.rag.facts import rows_to_facts, supersede_roles
 from backend.rag.graph_planner import GraphPlanner
 from backend.rag.planner_queries import person_roles_query
@@ -374,21 +376,41 @@ class GraphRAGSearcher:
                     sources.append(src)
         return sources
 
+    def _lf_usage(self, prompt_text=None, completion_text=None) -> dict:
+        try:
+            lu = getattr(
+                getattr(self._get_answer_gen(), "_gigachat", None),
+                "last_usage", None)
+        except Exception:
+            lu = None
+        return _lf.usage_details(lu, prompt_text, completion_text)
+
     def search(self, question: str, top_k: int = 8, include_context: bool = False) -> dict:
         """Единый путь: classify+plan, диспетчер enumerable/narrative.
 
         enumerable + факты -> шаблон (0 LLM-вызовов на ответе);
         шаблон пуст -> vector-fallback -> LLM; оба пусты -> тишина без LLM.
+
+        Трейсинг — Langfuse (best-effort, ответы не ломает).
         """
+        with _lf.observation("answer", input=question) as root:
+            try:
+                return self._search_inner(question, top_k, include_context, root)
+            finally:
+                _lf.flush()
+
+    def _search_inner(self, question, top_k, include_context, root) -> dict:
         logger.info("GraphRAG search: '%s'", question)
         plan_sink: list = []
         answer_sink: list = []
 
-        plan = query_planner.classify_and_plan(
-            question,
-            graph=self._get_planner()._get_graph(),
-            trace_sink=plan_sink,
-        )
+        with _lf.observation("classify_and_plan", input=question) as sp:
+            plan = query_planner.classify_and_plan(
+                question,
+                graph=self._get_planner()._get_graph(),
+                trace_sink=plan_sink,
+            )
+            sp.update(output=plan.to_dict())
         mode = plan.mode
         logger.info("plan: intent=%s mode=%s kind=%s org=%s",
                     plan.intent, mode, plan.kind, plan.org_norm_id)
@@ -404,13 +426,22 @@ class GraphRAGSearcher:
 
         if plan.intent == "entity_detail" and plan.target_name:
             return self._search_v2_entity(
-                question, plan, top_k, include_context, plan_sink, year_period)
+                question, plan, top_k, include_context, plan_sink,
+                year_period, root)
 
         if mode in ("struct", "local"):
             try:
-                graph_facts, plan_debug = self._get_planner().execute_v2(
-                    plan.to_dict()
-                )
+                with _lf.observation(
+                    "cypher_exec", as_type="retriever",
+                    input=plan.to_dict(),
+                ) as sp:
+                    graph_facts, plan_debug = self._get_planner().execute_v2(
+                        plan.to_dict()
+                    )
+                    sp.update(output={
+                        "facts_count": len(graph_facts),
+                        "cypher": (plan_debug or {}).get("cypher"),
+                    })
             except Exception as e:
                 logger.warning("v2 planner execution failed: %s", e)
             try:
@@ -427,7 +458,16 @@ class GraphRAGSearcher:
                     logger.warning("Group card resolve failed: %s", e)
             else:
                 try:
-                    posts = self._get_vec().search(question, top_k=5)
+                    with _lf.observation(
+                        "vector_search", as_type="retriever",
+                        input={"question": question, "top_k": 5,
+                               "reason": "struct_fallback"},
+                    ) as sp:
+                        posts = self._get_vec().search(question, top_k=5)
+                        sp.update(output={
+                            "posts_count": len(posts),
+                            "urls": [p.get("post_url") for p in posts[:10]],
+                        })
                 except Exception as e:
                     logger.warning("Vector fallback failed: %s", e)
             if mode == "struct":
@@ -449,7 +489,15 @@ class GraphRAGSearcher:
             communities = self._load_communities()
         else:  # basic
             try:
-                posts = self._get_vec().search(question, top_k=top_k)
+                with _lf.observation(
+                    "vector_search", as_type="retriever",
+                    input={"question": question, "top_k": top_k},
+                ) as sp:
+                    posts = self._get_vec().search(question, top_k=top_k)
+                    sp.update(output={
+                        "posts_count": len(posts),
+                        "urls": [p.get("post_url") for p in posts[:10]],
+                    })
             except Exception as e:
                 logger.warning("Vector search failed: %s", e)
             if year_period[0] or year_period[1]:
@@ -483,13 +531,23 @@ class GraphRAGSearcher:
                 # Стиль Летописи всем шаблонам (п.3–4 отзыва): детерминированный
                 # блок фактов + живой нарратив. Факты не выдумываются.
                 # LLM легла — answer_entity_detail вернёт голый шаблон.
-                narrative_answer, narrative_blocks = (
-                    self._get_answer_gen().answer_entity_detail(
-                        question, structured, source_posts + posts,
-                        trace_sink=answer_sink,
-                        facts_block="=== ФАКТЫ ===\n" + structured,
+                narrative_answer, narrative_blocks = None, {}
+                with _lf.observation(
+                    "llm_answer", as_type="generation", model=GIGACHAT_MODEL,
+                    input={"question": question, "facts_block": structured},
+                ) as gen:
+                    narrative_answer, narrative_blocks = (
+                        self._get_answer_gen().answer_entity_detail(
+                            question, structured, source_posts + posts,
+                            trace_sink=answer_sink,
+                            facts_block="=== ФАКТЫ ===\n" + structured,
+                        )
                     )
-                )
+                    gen.update(
+                        output=narrative_answer,
+                        usage_details=self._lf_usage(
+                            question, narrative_answer),
+                    )
                 if not (narrative_answer or "").strip():
                     narrative_answer = None
                 elif "в архивах нет данных" in (
@@ -517,17 +575,40 @@ class GraphRAGSearcher:
             blocks = {}
             answer_sink_note = "— без LLM (оба источника пусты) —"
         else:
-            answer, blocks = self._get_answer_gen().generate(
-                question,
-                mode=mode,
-                graph_facts=graph_facts,
-                posts=posts,
-                source_posts=source_posts,
-                communities=communities,
-                trace_sink=answer_sink,
-            )
+            with _lf.observation(
+                "llm_answer", as_type="generation", model=GIGACHAT_MODEL,
+                input={"question": question, "mode": mode,
+                       "facts_count": len(graph_facts),
+                       "posts_count": len(posts) + len(source_posts)},
+            ) as gen:
+                answer, blocks = self._get_answer_gen().generate(
+                    question,
+                    mode=mode,
+                    graph_facts=graph_facts,
+                    posts=posts,
+                    source_posts=source_posts,
+                    communities=communities,
+                    trace_sink=answer_sink,
+                )
+                gen.update(
+                    output=answer,
+                    usage_details=self._lf_usage(question, answer),
+                )
 
         sources = self._collect_sources(mode, graph_facts, source_posts, posts)
+
+        llm_calls = plan.llm_calls + len(answer_sink)
+        trace_id = _lf.current_trace_id()
+        root.update(output=answer, metadata={
+            "intent": plan.intent, "mode": mode, "kind": plan.kind,
+            "org_norm_id": plan.org_norm_id,
+            "prompt_version": ANSWER_PROMPT_VERSION,
+            "facts_count": len(graph_facts),
+            "posts_used": len(posts) + len(source_posts),
+            "llm_calls": llm_calls,
+        })
+        from backend.observability.checks import run_layer1 as _run_layer1
+        _run_layer1(trace_id, answer, graph_facts)
 
         if include_context:
             cypher = (plan_debug or {}).get("cypher")
@@ -565,13 +646,15 @@ class GraphRAGSearcher:
             "posts_used": len(posts) + len(source_posts),
             "context": blocks if include_context else None,
             "trace": None,
+            "trace_id": trace_id,
             "calls": calls,
-            # Метрика Фазы 6: сколько LLM-вызовов ушло на вопрос.
-            "llm_calls": plan.llm_calls + len(answer_sink),
+            # Сколько LLM-вызовов ушло на вопрос.
+            "llm_calls": llm_calls,
         }
 
     def _search_v2_entity(
-        self, question, plan, top_k, include_context, plan_sink, year_period
+        self, question, plan, top_k, include_context, plan_sink,
+        year_period, root,
     ) -> dict:
         """Фаза 5: entity_detail — структурный блок ролей + LLM-абзац раздельно."""
         answer_sink: list = []
@@ -582,7 +665,12 @@ class GraphRAGSearcher:
             if candidate is not None:
                 query, params = candidate
                 try:
-                    rows = graph.search_cypher(query, params)
+                    with _lf.observation(
+                        "cypher_exec", as_type="retriever",
+                        input={"query": query, "params": params},
+                    ) as sp:
+                        rows = graph.search_cypher(query, params)
+                        sp.update(output={"facts_count": len(rows)})
                 except Exception as e:
                     logger.warning("v2 person roles failed: %s", e)
         try:
@@ -593,7 +681,16 @@ class GraphRAGSearcher:
             supersede_roles(rows_to_facts(rows)), plan.target_name or "?")
         source_posts = self._resolve_source_posts(rows) if rows else []
         try:
-            posts = self._get_vec().search(question, top_k=5)
+            with _lf.observation(
+                "vector_search", as_type="retriever",
+                input={"question": question, "top_k": 5,
+                       "reason": "entity_detail"},
+            ) as sp:
+                posts = self._get_vec().search(question, top_k=5)
+                sp.update(output={
+                    "posts_count": len(posts),
+                    "urls": [p.get("post_url") for p in posts[:10]],
+                })
         except Exception as e:
             logger.warning("Vector search failed: %s", e)
             posts = []
@@ -603,10 +700,22 @@ class GraphRAGSearcher:
         # нарратива полностью. Осталась пустота — проза по одним фактам.
         narrative_posts = [p for p in source_posts + posts
                            if not _CONGRATS_RE.search(p.get("text") or "")]
-        answer, blocks = self._get_answer_gen().answer_entity_detail(
-            question, structured, narrative_posts, trace_sink=answer_sink,
-            facts_block=("=== ФАКТЫ ===\n" + structured if structured else None),
-        )
+        with _lf.observation(
+            "llm_answer", as_type="generation", model=GIGACHAT_MODEL,
+            input={"question": question,
+                   "facts_block": ("=== ФАКТЫ ===\n" + structured
+                                   if structured else None)},
+        ) as gen:
+            answer, blocks = self._get_answer_gen().answer_entity_detail(
+                question, structured, narrative_posts,
+                trace_sink=answer_sink,
+                facts_block=("=== ФАКТЫ ===\n" + structured
+                             if structured else None),
+            )
+            gen.update(
+                output=answer,
+                usage_details=self._lf_usage(question, answer),
+            )
         if structured and narrative_repeats_list(
                 rows, answer, structured):
             logger.warning("Entity narrative repeats list, dropping prose")
@@ -621,6 +730,18 @@ class GraphRAGSearcher:
             ]
         else:
             calls = None
+        llm_calls = plan.llm_calls + len(answer_sink)
+        trace_id = _lf.current_trace_id()
+        root.update(output=answer, metadata={
+            "intent": plan.intent, "mode": "local", "kind": plan.kind,
+            "target_name": plan.target_name,
+            "prompt_version": ANSWER_PROMPT_VERSION,
+            "facts_count": len(rows),
+            "posts_used": len(posts) + len(source_posts),
+            "llm_calls": llm_calls,
+        })
+        from backend.observability.checks import run_layer1 as _run_layer1
+        _run_layer1(trace_id, answer, rows)
         return {
             "answer": answer,
             "sources": sources,
@@ -630,8 +751,9 @@ class GraphRAGSearcher:
             "posts_used": len(posts) + len(source_posts),
             "context": blocks if include_context else None,
             "trace": None,
+            "trace_id": trace_id,
             "calls": calls,
-            "llm_calls": plan.llm_calls + len(answer_sink),
+            "llm_calls": llm_calls,
         }
 
     def close(self):

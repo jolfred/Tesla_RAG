@@ -69,6 +69,8 @@ class GigaChatClient:
         self._token = None
         self._token_expires_at = 0.0
         self._client = None
+        # Последний usage ответа API (для Langfuse usage_details); None — сервер не отдал.
+        self.last_usage: dict | None = None
 
     def _fetch_token(self) -> str:
         if not GIGACHAT_AUTH_KEY:
@@ -134,6 +136,18 @@ class GigaChatClient:
         )
         content = response.choices[0].message.content
         result = (content or "").strip()
+        try:
+            u = getattr(response, "usage", None)
+            self.last_usage = (
+                {
+                    "input": getattr(u, "prompt_tokens", 0) or 0,
+                    "output": getattr(u, "completion_tokens", 0) or 0,
+                }
+                if u is not None
+                else None
+            )
+        except Exception:
+            self.last_usage = None
         if trace_sink is not None:
             trace_sink.append(
                 {

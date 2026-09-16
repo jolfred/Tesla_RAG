@@ -35,3 +35,6 @@ Pillow>=10.4.0
 
 # GraphRAG v3 (детерминированные маркеры событий, Milestone B)
 pymorphy3>=2.0
+
+# Langfuse (наблюдаемость: трейсы + Score + Datasets/Experiments, self-host :3000)
+langfuse==4.15.3

@@ -1,0 +1,162 @@
+# Langfuse self-host (официальный compose, урезан до нужного).
+# Secrets сгенерированы 2026-09-16, headless-инициализация создаёт org/project/ключи без UI.
+# Подъём: docker compose -f docker-compose.langfuse.yml up -d
+services:
+  langfuse-worker:
+    image: docker.langfuse.com/langfuse/langfuse-worker:4
+    restart: always
+    depends_on: &langfuse-depends-on
+      lf-postgres:
+        condition: service_healthy
+      lf-minio:
+        condition: service_healthy
+      lf-redis:
+        condition: service_healthy
+      lf-clickhouse:
+        condition: service_healthy
+    ports:
+      - 127.0.0.1:3030:3030
+    environment: &langfuse-worker-env
+      NEXTAUTH_URL: http://localhost:3000
+      DATABASE_URL: postgresql://postgres:69a8060a8b40cccb18db36687fd4477d@lf-postgres:5432/postgres
+      SALT: e56405eb5ffba2b27ca3504dcc6773a8
+      ENCRYPTION_KEY: 6184619299151a675ef50c245a195181bafedee736a5d2d2548a3d653bbb6a41
+      TELEMETRY_ENABLED: "false"
+      # v4 target state — events_only, но тогда legacy-таблицы traces/
+      # observations не пишутся и public API их не отдаёт. Нам нужен dual:
+      # и события, и классические таблицы для traces/scores/datasets.
+      LANGFUSE_MIGRATION_V4_WRITE_MODE: dual
+      CLICKHOUSE_MIGRATION_URL: clickhouse://lf-clickhouse:9000
+      CLICKHOUSE_URL: http://lf-clickhouse:8123
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: 72e964ed06237be27fcebd1d8143c830
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_BATCH_EXPORT_REGION: us-east-1
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: minio
+      AWS_SECRET_ACCESS_KEY: ae07fb72cbecb5830804f3f8dc8352ad
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ae07fb72cbecb5830804f3f8dc8352ad
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://lf-minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ae07fb72cbecb5830804f3f8dc8352ad
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://lf-minio:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+      REDIS_HOST: lf-redis
+      REDIS_PORT: 6379
+      REDIS_AUTH: eedcbcba23ef1a9036d8891033cc85f0
+
+  langfuse-web:
+    image: docker.langfuse.com/langfuse/langfuse:4
+    restart: always
+    depends_on: *langfuse-depends-on
+    ports:
+      - 3000:3000
+    environment:
+      <<: *langfuse-worker-env
+      NEXTAUTH_SECRET: 58736faaacd1033adc0e095249a94d19
+      # Headless-инициализация: org + project + ключи создаются при старте без UI.
+      LANGFUSE_INIT_ORG_ID: tesla-org
+      LANGFUSE_INIT_ORG_NAME: Tesla GraphRAG
+      LANGFUSE_INIT_PROJECT_ID: tesla-graphrag
+      LANGFUSE_INIT_PROJECT_NAME: tesla-graphrag
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-7dd23a62104711f94fc87ede60c46f9a
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: sk-lf-04412e8105cc78941bc9e5ffa59b685fd54b38b5212d515a8b11bd16c8a4bc9d
+      LANGFUSE_INIT_USER_EMAIL: admin@tesla.local
+      LANGFUSE_INIT_USER_NAME: admin
+      LANGFUSE_INIT_USER_PASSWORD: tesla-langfuse-admin-2026
+
+  lf-clickhouse:
+    image: docker.io/clickhouse/clickhouse-server:25.12
+    restart: always
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: 72e964ed06237be27fcebd1d8143c830
+    volumes:
+      - lf_clickhouse_data:/var/lib/clickhouse
+      - lf_clickhouse_logs:/var/log/clickhouse-server
+    ports:
+      - 127.0.0.1:8123:8123
+      - 127.0.0.1:9000:9000
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 1s
+
+  lf-minio:
+    image: cgr.dev/chainguard/minio
+    restart: always
+    entrypoint: sh
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: ae07fb72cbecb5830804f3f8dc8352ad
+    ports:
+      - 9090:9000
+      - 127.0.0.1:9091:9001
+    volumes:
+      - lf_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 1s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
+
+  lf-redis:
+    image: docker.io/redis:7
+    restart: always
+    command: >
+      --requirepass eedcbcba23ef1a9036d8891033cc85f0
+      --maxmemory-policy noeviction
+    ports:
+      - 127.0.0.1:6379:6379
+    volumes:
+      - lf_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "eedcbcba23ef1a9036d8891033cc85f0", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+
+  lf-postgres:
+    image: docker.io/postgres:17
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 69a8060a8b40cccb18db36687fd4477d
+      POSTGRES_DB: postgres
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - 127.0.0.1:5432:5432
+    volumes:
+      - lf_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  lf_postgres_data:
+    driver: local
+  lf_clickhouse_data:
+    driver: local
+  lf_clickhouse_logs:
+    driver: local
+  lf_minio_data:
+    driver: local
+  lf_redis_data:
+    driver: local
