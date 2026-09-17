@@ -4,8 +4,10 @@ GraphRAG-сервис для Штаба СО КГЭУ «Тесла». VK-пос�
 
 ## GitHub (обязательно)
 
-- Все коммиты выгружать в `git@github.com:jolfred/Tesla_RAG.git` (ветка `gid-web` — лендинг).
-- Перед пушем: `git status`, `git diff --stat`; секреты (`.env`) не коммитить.
+- Источник истины — GitHub. Код всегда брать оттуда (`git pull`), не из локальных копий вслепую.
+- Пуш — только в `upstream` = `git@github.com:jolfred/Tesla_RAG` (SSH). `origin` — тот же репозиторий по HTTPS, для пуша не использовать.
+- Рабочий цикл: изменение → коммит → `git push` сразу → деплой на сервер. Пользователь проверяет всё через GitHub.
+- Активная ветка лендинга — `gid-web`. Перед пушем: `git status`, `git diff --stat`; секреты (`.env`) не коммитить.
 
 ## Команды
 
@@ -50,6 +52,7 @@ setsid nohup .venv/bin/python -m backend.indexer.indexer $(ls storage/posts/post
 
 # Фронтенд (сборка ТОЛЬКО через Docker, Node на хосте не ставится)
 docker run --rm -v $PWD/frontend:/app -v graphrag_npm_cache:/root/.npm -w /app node:20-alpine sh -c "npm ci && npm run build"
+# ВАЖНО: после правки package.json сначала `npm install` (перегенерить lock), иначе `npm ci` падает.
 # локальная разработка (Vite на 5173, прокси /api -> :8000):
 docker run --rm -p 5173:5173 -v $PWD/frontend:/app -v graphrag_npm_cache:/root/.npm -w /app node:20-alpine sh -c "npm ci && npm run dev"
 # тесты фронтенда (Vitest, jsdom):
@@ -67,6 +70,7 @@ docker run --rm -v $PWD/frontend:/app -v graphrag_npm_cache:/root/.npm -w /app n
   - `POST /api/v1/auth/vk {params, sign}` → VK-вход с проверкой подписи launch-параметров (HMAC-SHA256 на `VK_APP_SECRET`, официальный алгоритм VK) + контроль `vk_app_id` == `VK_APP_ID`; роль по allowlist `VK_ADMIN_IDS`; при пустом секрете → 501. Активен (секрет задан), фолбэк фронта на гостя при 401/501.
 - **Запуск в VK Mini App**: раздел «Настройки → Общие → Размещение» в dev.vk.com: поле **URL** — production-адрес приложения (публичный HTTPS), **Режим разработки** — адрес версии для администраторов (можно `http://localhost:8000` для теста в десктопном VK). VK грузит приложение в iframe с launch-параметрами (`?vk_user_id=...&sign=...`), фронт сам делает `VKWebAppInit` → `POST /auth/vk`. Production без публичного HTTPS-адреса (туннель ngrok/cloudflared на :8000 или сервер) на мобильных клиентах не заработает.
 - **Фронтенд**: `frontend/` (Vite + React + TS + VKUI + vk-bridge). Сборка только через Docker (`npm ci && npm run build`), готовая статика в `frontend/dist/`. FastAPI раздаёт `/assets/*` и отдаёт `index.html` для не-API GET-путей (SPA-fallback); `/api/*`, `/docs`, `/openapi.json`, `/redoc` не перехватываются. Собранную статику в docker-compose можно смонтировать: `./frontend/dist:/app/frontend/dist`.
+- **Лендинг (ветка `gid-web`, дефолтный экран)**: `frontend/src/landing/` — `LandingPage.tsx` (Hero + секции + CTA), `AiLetopis.tsx` (RAG-виджет через `api.chat`), `MagneticField.tsx` (WebGL-шейдер «магнитное поле», тихий fallback без WebGL), `data.ts` (контент + импорты логотипов из `src/assets/logos/`, ресайз 512px). Стек: Tailwind 3 (`preflight: false`, чтобы не ломать VKUI) + framer-motion. Старые `ChatPage/StatusPage` лежат в `src/pages/` как файлы, в роутинге не участвуют.
 - **Модуль аутентификации фронта**: `frontend/src/auth/` (authContext + `localStorage`), `frontend/src/api/client.ts` (Bearer-инжекция + авто-перевыдача гостя при 401), `frontend/src/types.ts` (единый источник истины контрактов API). Экраны: Чат (`src/pages/ChatPage.tsx`), Статус (`src/pages/StatusPage.tsx`, вход/выход админа).
 - **Новые переменные .env**: `SESSION_TTL` (30), `VK_APP_ID` (задан), `VK_APP_SECRET` (задан → VK-вход активен; пусто → неактивен, 501), `VK_ADMIN_IDS` (CSV).
 - **Тесты M1**: `backend/api/test_sessions.py`, `backend/api/test_auth.py` (вкл. тест-векторы VK sign, Bearer vs X-API-Key на `/chat`). Админ-роуты (`documents/index/communities`) по-прежнему только X-API-Key; Bearer-зависимость `verify_admin_session` готова к M2.
@@ -75,7 +79,7 @@ docker run --rm -v $PWD/frontend:/app -v graphrag_npm_cache:/root/.npm -w /app n
 
 - **Два разных Qdrant.** В `.env` `QDRANT_MODE=local`, но **индексатор и `vec_search.py` ходят в серверный Qdrant на порту 6333 напрямую** (коллекция `posts`), игнорируя `QDRANT_MODE`. Локальный `storage/qdrant_db` (коллекция `tesla_knowledge`, виден в `/api/v1/status`) использует только старый `backend/embeddings/qdrant_client.py` — не трогай его за состояние RAG.
 - **Эмбеддинги индексатора и поиска**: `text-embedding-3-small` через ProxyAPI, а НЕ через sentence-transformers. `backend/embeddings/model.py` использует ленивый импорт sentence-transformers (пакет не установлен) — не вызывай этот путь.
-- **Neo4j — Community edition**, мульти-БД недоступна. Схема «двух моделей»: сущности/рёбра имеют `source_model` + композитный уникальный ключ `merge_key = "{source_model}::{id}"` (constraint на `merge_key`, не на `id`). Сейчас все данные `source_model='gigachat'`; Gemma-ветка готова, но заморожена.
+- **Neo4j — Community edition**, мульти-БД недоступна. Схема «двух моделей»: сущности/рёбра имеют `source_model` + композитный уникальный ключ `merge_key = "{source_model}::{id}"` (constraint на `merge_key`, не на `id`). Сейчас живые данные `source_model='llmgraph_gigachat'` (v2-граф, ~296 узлов); legacy `gigachat` и Gemma-ветка заморожены.
 - **Индексатор**: `--model gigachat|gemma|proxyapi`, `--min-date ''` = все годы. Пропускает посты с пустым `text_clean` (посты-картинки с одними хэштегами) — это ожидаемо, не баг. `--parallel` только для gemma.
 - **GigaChat**: OAuth через `ngw.devices.sberbank.ru` с `verify=False`; клиент `backend/utils/gigachat_client.py`; таймаут 120с (дефолтный 600с вешал процесс). Модель: `GigaChat-3-Ultra` (`GIGACHAT_MODEL`). `LLM_PROVIDER` в `answer_generator.py` = `gigachat`.
 - **VK-токен**: в `.env` реальный ключ лежит в `VK_SERVICE_TOKEN1` (`VK_SERVICE_TOKEN` пустой); скрапер читает оба: `os.getenv("VK_SERVICE_TOKEN") or os.getenv("VK_SERVICE_TOKEN1")`.
@@ -95,6 +99,14 @@ docker run --rm -v $PWD/frontend:/app -v graphrag_npm_cache:/root/.npm -w /app n
 - Посты: `storage/posts/*.jsonl` → `indexer` → Neo4j `:Entity`/`RELATES` + Qdrant `posts`.
 - Сообщества: Neo4j → `build_communities.py` → `storage/communities.json` (используется для global-режима).
 - Ответы: вопрос → `searcher.search()` → план (`query_planner`) → источники `group://` и `vk.com` в ответе.
+
+## Деплой лендинга (ВМ Кирилла, фронт-only)
+
+- ВМ: `jolfred@192.168.10.160` (Ubuntu 24.04, 1 CPU, ~576МБ RAM — хватает только на статику). SSH-ключ каждый раз даёт пользователь (файл, `chmod 600`); приватные ключи в чат не вставлять повторно, в репозиторий не класть.
+- Схема: на ВМ только nginx + собранный `frontend/dist`; RAG-стек (API:8000, Neo4j, Qdrant) и Langfuse остаются здесь. Секреты на ВМ не везти.
+- Перед ВМ стоит HAProxy Кирилла: шлёт `sotesla-jolfred.deagly.tech` → `:80` с `send-proxy-v2`, сертификат терминирует балансировщик. Поэтому в nginx обязательно `listen 80 proxy_protocol` + `real_ip_header proxy_protocol`, иначе ляжет и трафик, и хелсчек. `/api/` → `proxy_pass` сюда (таймаут ≥120с под GigaChat), `/` → статика, gzip вкл.
+- Риск: если хелсчек балансировщика идёт без PROXY-заголовка — просить у Кирилла `check-send-proxy` (его сторона, одна строка).
+- Проверка: вопрос ИИ-Летописи end-to-end через домен + логи nginx и `storage/logs/api.log`.
 
 ## Мониторинг
 
