@@ -2,6 +2,11 @@
 
 GraphRAG-сервис для Штаба СО КГЭУ «Тесла». VK-посты → граф (Neo4j) + векторный индекс (Qdrant) → Louvain-сообщества → ответы через GigaChat. Работает только с серверами Docker (`docker compose up -d qdrant neo4j`); Python-venv в `.venv`.
 
+## GitHub (обязательно)
+
+- Все коммиты выгружать в `git@github.com:jolfred/Tesla_RAG.git` (ветка `gid-web` — лендинг).
+- Перед пушем: `git status`, `git diff --stat`; секреты (`.env`) не коммитить.
+
 ## Команды
 
 ```bash

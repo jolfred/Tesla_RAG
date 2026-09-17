@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 
 import '@vkontakte/vkui/dist/vkui.css'
+import './index.css'
 
 import App from './App'
 
