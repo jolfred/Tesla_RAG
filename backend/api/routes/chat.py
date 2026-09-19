@@ -33,9 +33,7 @@ async def chat(
             answer=result["answer"],
             sources=[SourceInfo(**s) for s in result["sources"]],
             media=result.get("media", []),
-            preview=PostPreview(**result["preview"])
-            if result.get("preview")
-            else None,
+            previews=[PostPreview(**p) for p in (result.get("previews") or [])],
             mode=result.get("mode", "basic"),
             facts_count=result.get("facts_count", 0),
             posts_used=result.get("posts_used", 0),

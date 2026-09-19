@@ -32,21 +32,19 @@ def test_collect_media_empty():
     assert GraphRAGSearcher._collect_media([_post("u")], []) == []
 
 
-def test_build_preview_prefers_post_with_photo():
+def test_build_previews_order_limit_and_skip():
     no_photo = _post("u1", [], text="без фото, но длинный текст" * 10)
     with_photo = _post("u2", ["pic"], text="с фото", group="Отряд", date="2026-03-01")
-    prev = GraphRAGSearcher._build_preview([no_photo, with_photo], [])
-    # первый годный пост (даже без фото) — превью строится по порядку
-    assert prev["url"] == "u1"
-    prev2 = GraphRAGSearcher._build_preview([with_photo], [])
-    assert prev2 == {"group_name": "Отряд", "published_at": "2026-03-01",
-                     "text": "с фото", "photo": "https://vk.com/pic.jpg", "url": "u2"}
-
-
-def test_build_preview_skips_group_cards_and_truncates():
     card = _post("group://x", ["pic"], text="карточка")
-    long_post = _post("u", ["pic2"], text="x" * 500)
-    prev = GraphRAGSearcher._build_preview([card, long_post], [])
-    assert prev["url"] == "u"
-    assert len(prev["text"]) == 280
-    assert GraphRAGSearcher._build_preview([card], []) is None
+    prevs = GraphRAGSearcher._build_previews([card, no_photo, with_photo], [])
+    assert [p["url"] for p in prevs] == ["u1", "u2"]
+    assert prevs[1] == {"group_name": "Отряд", "published_at": "2026-03-01",
+                        "text": "с фото", "photo": "https://vk.com/pic.jpg", "url": "u2"}
+
+
+def test_build_previews_limit_and_truncate():
+    posts = [_post(f"u{i}", ["pic"], text="x" * 500) for i in range(6)]
+    prevs = GraphRAGSearcher._build_previews(posts, [], limit=4)
+    assert len(prevs) == 4
+    assert all(len(p["text"]) == 280 for p in prevs)
+    assert GraphRAGSearcher._build_previews([_post("group://x")], []) == []

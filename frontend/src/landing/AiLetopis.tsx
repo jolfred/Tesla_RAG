@@ -10,7 +10,6 @@ interface AnswerState {
   loading: boolean
   data: ChatResponse | null
   error: string
-  image: string
 }
 
 const MODE_LABELS: Record<string, string> = {
@@ -62,75 +61,43 @@ function Linkified({ text }: { text: string }): React.JSX.Element {
   return <>{parts}</>
 }
 
-function Gallery({ photos, fallback }: { photos: string[]; fallback: string }): React.JSX.Element {
-  const [sel, setSel] = useState(0)
-  const list = photos.length > 0 ? photos : [fallback]
-  const multi = list.length > 1
+/** Карусель превью постов: переключение стрелками, счётчик. */
+function PreviewCarousel({ previews }: { previews: NonNullable<ChatResponse['previews']> }): React.JSX.Element | null {
+  const [idx, setIdx] = useState(0)
+  if (previews.length === 0) return null
+  const cur = previews[Math.min(idx, previews.length - 1)]
+  const go = (d: number): void => setIdx((i) => (i + d + previews.length) % previews.length)
+  const arrow: React.CSSProperties = {
+    width: 36,
+    height: 36,
+    minWidth: 36,
+    borderRadius: 999,
+    border: '1px solid rgba(157,101,255,0.5)',
+    background: 'rgba(122,62,230,0.16)',
+    color: '#D9CCFF',
+    fontSize: 18,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  }
   return (
-    <div>
-      <div style={{ position: 'relative', minHeight: 200, background: '#0B0A12' }}>
-        <img
-          key={list[Math.min(sel, list.length - 1)]}
-          src={list[Math.min(sel, list.length - 1)]}
-          alt="Фото из постов штаба"
-          loading="lazy"
-          style={{ width: '100%', maxHeight: 340, objectFit: 'cover', display: 'block' }}
-        />
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            pointerEvents: 'none',
-            background: 'linear-gradient(to bottom, transparent 55%, rgba(7,6,10,0.65))',
-          }}
-        />
-        {multi && (
-          <span
-            style={{
-              position: 'absolute',
-              right: 12,
-              bottom: 12,
-              fontSize: 12,
-              fontWeight: 700,
-              background: 'rgba(7,6,10,0.72)',
-              border: '1px solid rgba(157,101,255,0.5)',
-              color: '#D9CCFF',
-              borderRadius: 999,
-              padding: '4px 10px',
-            }}
-          >
-            {Math.min(sel + 1, list.length)} / {list.length} фото
-          </span>
-        )}
+    <div style={{ flex: '0 0 300px', alignSelf: 'start', minWidth: 0 }} className="ai-preview-col">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <button type="button" onClick={() => go(-1)} aria-label="Предыдущий пост" style={arrow}>‹</button>
+        <span style={{ fontSize: 12, fontWeight: 700, color: '#9D65FF', whiteSpace: 'nowrap' }}>
+          Пост {Math.min(idx, previews.length - 1) + 1} / {previews.length}
+        </span>
+        <button type="button" onClick={() => go(1)} aria-label="Следующий пост" style={arrow}>›</button>
       </div>
-      {multi && (
-        <div className="thin-scroll" style={{ display: 'flex', gap: 8, padding: 12, overflowX: 'auto', background: 'rgba(7,6,10,0.5)' }}>
-          {list.map((src, i) => (
-            <button
-              key={`${src}-${i}`}
-              type="button"
-              onClick={() => setSel(i)}
-              aria-label={`Фото ${i + 1}`}
-              style={{
-                border: i === sel ? '2px solid #9D65FF' : '2px solid transparent',
-                borderRadius: 10,
-                padding: 0,
-                cursor: 'pointer',
-                background: 'none',
-                flex: '0 0 auto',
-              }}
-            >
-              <img src={src} alt="" loading="lazy" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8, display: 'block', opacity: i === sel ? 1 : 0.6 }} />
-            </button>
-          ))}
-        </div>
-      )}
+      <VkPreview key={cur.url} preview={cur} />
+      <style>{'.ai-preview-col aside { flex: none !important; width: 100%; }'}</style>
     </div>
   )
 }
 
 /** Предпросмотр VK-поста: группа, дата, выдержка, фото, кнопка «Открыть в VK». */
-function VkPreview({ preview }: { preview: NonNullable<ChatResponse['preview']> }): React.JSX.Element {
+function VkPreview({ preview }: { preview: NonNullable<ChatResponse['previews']>[number] }): React.JSX.Element {
   const initial = (preview.group_name || 'Т').trim().charAt(0).toUpperCase()
   return (
     <aside
@@ -234,7 +201,6 @@ function AnswerCard({ state }: { state: AnswerState }): React.JSX.Element | null
       className="glass-card"
       style={{ borderRadius: 20, marginTop: 16, overflow: 'hidden' }}
     >
-      <Gallery photos={d.media ?? []} fallback={state.image} />
       <div style={{ padding: 20 }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
           <span
@@ -272,38 +238,25 @@ function AnswerCard({ state }: { state: AnswerState }): React.JSX.Element | null
             <div style={{ fontSize: 15, lineHeight: 1.65, color: '#F2EFFF', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
               <Linkified text={d.answer} />
             </div>
-            {d.sources.length > 0 && (
-              <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {d.sources.slice(0, 3).map((s, i) => (
-                  <a
-                    key={i}
-                    href={s.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ fontSize: 13, color: '#B79CFF', textDecoration: 'none' }}
-                  >
-                    ↗ {shortLabel(s.url)}
-                  </a>
-                ))}
-              </div>
-            )}
           </div>
-          {d.preview && d.preview.url && <VkPreview preview={d.preview} />}
+          {(d.previews ?? []).length > 0 && (
+            <PreviewCarousel key={(d.previews ?? []).map((p) => p.url).join('|')} previews={d.previews ?? []} />
+          )}
         </div>
       </div>
-      <style>{'@media (max-width: 760px) { .ai-answer-cols { flex-direction: column !important; } .ai-answer-cols aside { flex: none !important; width: 100%; } }'}</style>
+      <style>{'@media (max-width: 760px) { .ai-answer-cols { flex-direction: column !important; } .ai-preview-col { flex: none !important; width: 100%; } }'}</style>
     </motion.div>
   )
 }
 
 export default function AiLetopis(): React.JSX.Element {
   const [input, setInput] = useState('')
-  const [state, setState] = useState<AnswerState>({ question: '', loading: false, data: null, error: '', image: PRESET_QUESTIONS[0].image })
+  const [state, setState] = useState<AnswerState>({ question: '', loading: false, data: null, error: '' })
 
-  const ask = async (question: string, image?: string): Promise<void> => {
+  const ask = async (question: string): Promise<void> => {
     const q = question.trim()
     if (!q || state.loading) return
-    setState((s) => ({ ...s, question: q, loading: true, data: null, error: '', image: image ?? s.image }))
+    setState((s) => ({ ...s, question: q, loading: true, data: null, error: '' }))
     try {
       const resp = await api.chat({ question: q })
       setState((s) => ({ ...s, loading: false, data: resp }))
@@ -381,7 +334,7 @@ export default function AiLetopis(): React.JSX.Element {
             type="button"
             onClick={() => {
               setInput(p.question)
-              void ask(p.question, p.image)
+              void ask(p.question)
             }}
             className="glass-card"
             style={{

@@ -61,7 +61,7 @@ export interface ChatResponse {
   answer: string
   sources: SourceInfo[]
   media: string[]
-  preview?: PostPreview | null
+  previews?: PostPreview[]
   mode: ChatMode
   facts_count: number
   posts_used: number

@@ -258,10 +258,13 @@ class GraphRAGSearcher:
         return media
 
     @staticmethod
-    def _build_preview(source_posts, posts) -> dict | None:
-        """Превью VK-поста для лендинга: первый пост с фото (выдержка+фото),
-        иначе первый пост с текстом. group://-карточки пропускаем."""
+    def _build_previews(source_posts, posts, limit: int = 4) -> list[dict]:
+        """Превью VK-постов для лендинга: первые посты с текстом (в идеале
+        с фото). group://-карточки пропускаем. Порядок — по релевантности."""
+        previews: list[dict] = []
         for p in (source_posts or []) + (posts or []):
+            if len(previews) >= limit:
+                break
             url = p.get("post_url") or ""
             if not url or url.startswith("group://"):
                 continue
@@ -270,14 +273,14 @@ class GraphRAGSearcher:
                       if isinstance(u, str) and u.startswith("http")]
             if not text and not photos:
                 continue
-            return {
+            previews.append({
                 "group_name": p.get("group_name") or "",
                 "published_at": p.get("published_at") or "",
                 "text": text[:280],
                 "photo": photos[0] if photos else "",
                 "url": url,
-            }
-        return None
+            })
+        return previews
 
     @staticmethod
     def _collect_sources(mode, graph_facts, source_posts, posts) -> list[dict]:
@@ -580,7 +583,7 @@ class GraphRAGSearcher:
             "answer": answer,
             "sources": sources,
             "media": self._collect_media(source_posts, posts),
-            "preview": self._build_preview(source_posts, posts),
+            "previews": self._build_previews(source_posts, posts),
             "mode": mode,
             "facts_count": len(graph_facts),
             "posts_used": len(posts) + len(source_posts),
