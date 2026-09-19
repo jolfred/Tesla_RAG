@@ -62,5 +62,18 @@ describe('LandingPage гид-web', () => {
       expect(img.getAttribute('width')).toBe('44')
       expect(img.getAttribute('height')).toBe('44')
     })
+    // Хедер: логотип Теслы крупный (80px)
+    const headerLogo = screen.getByAltText('Логотип штаба Тесла')
+    expect(headerLogo.getAttribute('width')).toBe('80')
+    // Футер: слоган справа + отряды по направлениям со ссылками
+    expect(screen.getByText(/Только Тесла — только Победа/)).toBeTruthy()
+    const footer = document.querySelector('footer')
+    expect(footer).toBeTruthy()
+    const isidaLinks = [...(footer as HTMLElement).querySelectorAll('a')].filter(
+      (a) => a.getAttribute('href') === 'https://vk.ru/sso_isida',
+    )
+    expect(isidaLinks.length).toBeGreaterThanOrEqual(1)
+    // Направление есть и в секции направлений, и в футере
+    expect(screen.getAllByText('Строительное').length).toBeGreaterThanOrEqual(2)
   })
 })

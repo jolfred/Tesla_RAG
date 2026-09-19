@@ -180,6 +180,8 @@ class GraphRAGSearcher:
                     "published_at": pay.get("published_at", ""),
                     "group_name": pay.get("group_name", ""),
                     "text": text,
+                    "photos": [p for p in (pay.get("photos") or [])
+                               if isinstance(p, str) and p.startswith("http")],
                 }
             )
         logger.info("Resolved %d/%d source posts", len(posts), len(urls))
@@ -239,6 +241,43 @@ class GraphRAGSearcher:
                 items = enrich_units(names, directions, self._unit_metas())
                 return render_units_enriched(items, org_name)
         return render("units", graph_facts, org_name)
+
+    @staticmethod
+    def _collect_media(source_posts, posts, per_post: int = 4,
+                       total: int = 8) -> list[str]:
+        """Фото для карточки ответа: все фото поста (до per_post), затем
+        фото из других постов (до total всего). Порядок — по релевантности
+        постов (source_posts, затем векторные). Дубли режутся."""
+        media: list[str] = []
+        for p in (source_posts or []) + (posts or []):
+            for url in (p.get("photos") or [])[:per_post]:
+                if url not in media:
+                    media.append(url)
+                if len(media) >= total:
+                    return media
+        return media
+
+    @staticmethod
+    def _build_preview(source_posts, posts) -> dict | None:
+        """Превью VK-поста для лендинга: первый пост с фото (выдержка+фото),
+        иначе первый пост с текстом. group://-карточки пропускаем."""
+        for p in (source_posts or []) + (posts or []):
+            url = p.get("post_url") or ""
+            if not url or url.startswith("group://"):
+                continue
+            text = (p.get("text") or "").strip()
+            photos = [u for u in (p.get("photos") or [])
+                      if isinstance(u, str) and u.startswith("http")]
+            if not text and not photos:
+                continue
+            return {
+                "group_name": p.get("group_name") or "",
+                "published_at": p.get("published_at") or "",
+                "text": text[:280],
+                "photo": photos[0] if photos else "",
+                "url": url,
+            }
+        return None
 
     @staticmethod
     def _collect_sources(mode, graph_facts, source_posts, posts) -> list[dict]:
@@ -540,7 +579,8 @@ class GraphRAGSearcher:
         return {
             "answer": answer,
             "sources": sources,
-            "media": [],
+            "media": self._collect_media(source_posts, posts),
+            "preview": self._build_preview(source_posts, posts),
             "mode": mode,
             "facts_count": len(graph_facts),
             "posts_used": len(posts) + len(source_posts),

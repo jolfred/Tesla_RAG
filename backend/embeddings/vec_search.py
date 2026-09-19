@@ -58,6 +58,8 @@ class VectorSearcher:
                 "published_at": payload.get("published_at", ""),
                 "group_name": payload.get("group_name", ""),
                 "text": payload.get("text_clean", "") or payload.get("text", ""),
+                "photos": [p for p in (payload.get("photos") or [])
+                           if isinstance(p, str) and p.startswith("http")],
             })
         return hits
 

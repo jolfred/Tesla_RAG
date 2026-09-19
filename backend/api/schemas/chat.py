@@ -20,10 +20,21 @@ class CallWindow(BaseModel):
     text: str = ""
 
 
+class PostPreview(BaseModel):
+    """Превью VK-поста для лендинга: группа, дата, выдержка, первое фото."""
+
+    group_name: str = ""
+    published_at: str = ""
+    text: str = ""
+    photo: str = ""
+    url: str = ""
+
+
 class ChatResponse(BaseModel):
     answer: str
     sources: list[SourceInfo] = []
     media: list[str] = []
+    preview: PostPreview | None = None
     mode: str = "basic"
     facts_count: int = 0
     posts_used: int = 0

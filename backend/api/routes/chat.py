@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from backend.api.auth import verify_admin_session_optional, verify_user_any
-from backend.api.schemas.chat import CallWindow, ChatRequest, ChatResponse, SourceInfo
+from backend.api.schemas.chat import CallWindow, ChatRequest, ChatResponse, PostPreview, SourceInfo
 from backend.rag.searcher import GraphRAGSearcher
 from backend.utils.logger import setup_logger
 
@@ -33,6 +33,9 @@ async def chat(
             answer=result["answer"],
             sources=[SourceInfo(**s) for s in result["sources"]],
             media=result.get("media", []),
+            preview=PostPreview(**result["preview"])
+            if result.get("preview")
+            else None,
             mode=result.get("mode", "basic"),
             facts_count=result.get("facts_count", 0),
             posts_used=result.get("posts_used", 0),

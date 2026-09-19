@@ -82,13 +82,13 @@ function Header(): React.JSX.Element {
         <img
           src={teslaHeaderLogo}
           alt="Логотип штаба Тесла"
-          width={38}
-          height={38}
-          style={{ width: 38, height: 38, borderRadius: 12, objectFit: 'cover', boxShadow: '0 0 24px rgba(122,62,230,0.5)' }}
+          width={80}
+          height={80}
+          style={{ width: 80, height: 80, borderRadius: 20, objectFit: 'cover', boxShadow: '0 0 32px rgba(122,62,230,0.55)' }}
         />
         <div>
-          <div className="tesla-display" style={{ fontWeight: 700, fontSize: 16 }}>Тесла</div>
-          <div style={{ fontSize: 11, color: '#8E86A8', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Штаб СО КГЭУ</div>
+          <div className="tesla-display" style={{ fontWeight: 700, fontSize: 19 }}>Тесла</div>
+          <div style={{ fontSize: 12, color: '#8E86A8', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Штаб СО КГЭУ</div>
         </div>
       </div>
       <div
@@ -380,15 +380,41 @@ export default function LandingPage(): React.JSX.Element {
             </div>
           </div>
         </motion.div>
-        <footer style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginTop: 26, color: '#8E86A8', fontSize: 12, alignItems: 'center' }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <img src={kgeuLogo} alt="КГЭУ" loading="lazy" width={30} height={30} style={{ width: 30, height: 30, borderRadius: 999, objectFit: 'cover', border: '1px solid rgba(122,62,230,0.35)' }} />
-            Штаб студенческих отрядов КГЭУ «Тесла» · Летопись на RAG-архиве постов
-          </span>
-          <span style={{ display: 'flex', gap: 16 }}>
+        <footer>
+          <div className="footer-squads" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 18, padding: '34px 0 8px', borderTop: '1px solid rgba(122,62,230,0.2)' }}>
+            {Object.entries(
+              SQUADS.reduce<Record<string, typeof SQUADS>>((acc, s) => {
+                ;(acc[s.direction] = acc[s.direction] || []).push(s)
+                return acc
+              }, {}),
+            ).map(([direction, squads]) => (
+              <div key={direction}>
+                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#9D65FF', marginBottom: 10 }}>
+                  {direction}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                  {squads.map((s) => (
+                    <a key={s.name} href={s.vk} target="_blank" rel="noreferrer" style={{ fontSize: 13.5, color: '#CFC6EC', textDecoration: 'none' }}>
+                      {s.name}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginTop: 22, paddingBottom: 8, color: '#8E86A8', fontSize: 12, alignItems: 'center' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <img src={kgeuLogo} alt="КГЭУ" loading="lazy" width={30} height={30} style={{ width: 30, height: 30, borderRadius: 999, objectFit: 'cover', border: '1px solid rgba(122,62,230,0.35)' }} />
+              Штаб студенческих отрядов КГЭУ «Тесла» · Летопись на RAG-архиве постов
+            </span>
+            <span className="tesla-display" style={{ fontWeight: 700, fontSize: 14, background: 'linear-gradient(92deg, #9D65FF, #D9CCFF)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' }}>
+              Только Тесла — только Победа
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 16, paddingBottom: 26, fontSize: 12 }}>
             <a href="/api/v1/status" style={{ color: '#9D65FF', textDecoration: 'none' }}>status</a>
             <a href="https://vk.ru/rso_tesla" target="_blank" rel="noreferrer" style={{ color: '#9D65FF', textDecoration: 'none' }}>vk → rso_tesla</a>
-          </span>
+          </div>
         </footer>
       </section>
     </div>

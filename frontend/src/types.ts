@@ -49,10 +49,19 @@ export interface CallWindow {
   text: string
 }
 
+export interface PostPreview {
+  group_name: string
+  published_at: string
+  text: string
+  photo: string
+  url: string
+}
+
 export interface ChatResponse {
   answer: string
   sources: SourceInfo[]
   media: string[]
+  preview?: PostPreview | null
   mode: ChatMode
   facts_count: number
   posts_used: number

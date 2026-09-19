@@ -25,6 +25,8 @@ def save_to_qdrant(
         )
         logger.info("Created Qdrant collection '%s'", collection_name)
 
+    photos = ((post.get("attachments") or {}).get("photos") or [])
+    photos = [p for p in photos if isinstance(p, str) and p.startswith("http")][:10]
     point = PointStruct(
         id=str(uuid.uuid5(uuid.NAMESPACE_URL, str(post.get("post_url", "")))),
         vector=vector,
@@ -34,6 +36,7 @@ def save_to_qdrant(
             "group_name": post.get("group_name", ""),
             "text_clean": post.get("text_clean", ""),
             "source_model": collection_name,
+            "photos": photos,
         },
     )
     qclient.upsert(collection_name=collection_name, points=[point])
