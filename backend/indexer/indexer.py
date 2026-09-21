@@ -62,10 +62,19 @@ def process_indexer(
     parallel: int = 1,
     extractor: str = "legacy",
     force: bool = False,
+    project_slug: str | None = None,
+    extra_posts: list[dict] | None = None,
 ) -> None:
+    """Индексация. project_slug изолирует ветку: source_model='proj_<slug>',
+    Qdrant-коллекция 'posts_proj_<slug>'. extra_posts — псевдо-посты
+    (документы проекта), проходят тот же date-фильтр и resume."""
+    from backend.admin.indexing import project_collection, project_source_model
+
     unique_posts, _ = load_posts(jsonl_paths)
 
     filtered = filter_posts(unique_posts, min_date=min_date)
+    if extra_posts:
+        filtered = filtered + filter_posts(extra_posts, min_date=min_date)
     logger.info(
         "Loaded %d unique posts (by url), %d after date filter (min_date=%s)",
         len(unique_posts),
@@ -76,7 +85,10 @@ def process_indexer(
     openai_client, neo4j_driver, qdrant_client = init_clients()
     migrate_neo4j_for_dual_model(neo4j_driver)
 
-    collection_name = collection_for_model(model)
+    collection_name = (
+        project_collection(project_slug) if project_slug else collection_for_model(model)
+    )
+    eff_source_model = project_source_model(project_slug) if project_slug else None
     # Эмбеддинги не пересчитываются: точка с post_url уже есть -> пропускаем
     # и вызов ProxyAPI, и upsert (идемпотентность по uuid5(post_url)).
     from backend.indexer.qdrant_writer import get_indexed_post_urls as _q_urls
@@ -92,13 +104,14 @@ def process_indexer(
         from backend.indexer.graph_schema_v2 import SOURCE_MODEL_V2
         from backend.indexer.neo4j_writer_v2 import get_indexed_post_urls_v2
 
-        graph_urls = get_indexed_post_urls_v2(neo4j_driver, SOURCE_MODEL_V2)
+        _graph_model = eff_source_model or SOURCE_MODEL_V2
+        graph_urls = get_indexed_post_urls_v2(neo4j_driver, _graph_model)
         to_process = [p for p in filtered if p.get("post_url") not in graph_urls]
         logger.info(
             "Force+transformer: %d posts already in graph branch '%s', "
             "processing %d remaining (model=%s)",
             len(filtered) - len(to_process),
-            SOURCE_MODEL_V2,
+            _graph_model,
             len(to_process),
             model,
         )
@@ -129,6 +142,7 @@ def process_indexer(
 
         transformer = build_transformer(build_llm(model))
         logger.info("Using LLMGraphTransformer (model=%s)", model)
+        transformer_model = eff_source_model or SOURCE_MODEL_V2
     total = 0
     errors = 0
 
@@ -166,7 +180,7 @@ def process_indexer(
                     neo4j_driver,
                     clean_nodes,
                     clean_rels,
-                    source_model=SOURCE_MODEL_V2,
+                    source_model=transformer_model,
                     post_url=meta.get("post_url") or post.get("post_url"),
                     post_date=meta.get("published_at") or post.get("published_at"),
                     group_name=meta.get("group_name") or post.get("group_name"),
@@ -175,7 +189,7 @@ def process_indexer(
         else:
             graph_result = extract_graph_from_post(post, extractor_obj)
 
-            save_to_neo4j(neo4j_driver, graph_result, source_model=model)
+            save_to_neo4j(neo4j_driver, graph_result, source_model=eff_source_model or model)
 
         if need_vector:
             save_to_qdrant(qdrant_client, post, vector, collection_name)
@@ -242,6 +256,12 @@ def main() -> None:
         help="Reprocess all filtered posts even if already in Qdrant "
         "(Qdrant upsert is idempotent; needed for graph reindex pilots)",
     )
+    parser.add_argument(
+        "--project",
+        default="",
+        help="Project slug: isolate branch (source_model='proj_<slug>', "
+        "Qdrant 'posts_proj_<slug>')",
+    )
     args = parser.parse_args()
     process_indexer(
         args.paths,
@@ -250,6 +270,7 @@ def main() -> None:
         parallel=args.parallel,
         extractor=args.extractor,
         force=args.force,
+        project_slug=args.project or None,
     )
 
 

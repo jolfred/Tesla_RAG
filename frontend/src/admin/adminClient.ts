@@ -94,6 +94,20 @@ export const adminApi = {
       `/api/v1/admin/projects/${encodeURIComponent(slug)}/items?item_type=${encodeURIComponent(item_type)}&item_id=${encodeURIComponent(item_id)}`,
       { method: 'DELETE' },
     ),
+  indexProject: (slug: string, body: { model: string; extractor: string; min_date: string; force: boolean }) =>
+    req<{ job_id: string; status: string }>(`/api/v1/admin/projects/${encodeURIComponent(slug)}/index`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  projectStats: (slug: string) =>
+    req<{
+      source_model: string
+      collection: string
+      neo4j_nodes: number
+      neo4j_relations: number
+      qdrant_points: number
+      error: string
+    }>(`/api/v1/admin/projects/${encodeURIComponent(slug)}/stats`),
   documents: () => req<{ documents: AdminDocument[] }>('/api/v1/admin/documents'),
   uploadDocument: async (file: File, title: string): Promise<{ doc_id: string; title: string }> => {
     const fd = new FormData()

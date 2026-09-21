@@ -16,6 +16,7 @@ from backend.admin import jobs as _jobs
 from backend.admin import projects as _projects
 from backend.admin.db import get_connection, init_admin_db
 from backend.admin.groups import append_link, group_statuses
+from backend.admin.indexing import project_composition, project_stats
 from backend.api.auth import verify_admin_session
 from backend.config import DOCUMENTS_DIR
 from backend.utils.logger import setup_logger
@@ -276,3 +277,64 @@ async def admin_job(job_id: str, _: dict = Depends(verify_admin_session)) -> dic
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
     return job
+
+
+# --- Индексация проекта в свой namespace (шаг 3) ---
+
+
+@router.post("/api/v1/admin/projects/{slug}/index", status_code=202)
+async def admin_index_project(
+    slug: str,
+    body: dict,
+    bg: BackgroundTasks,
+    _: dict = Depends(verify_admin_session),
+) -> dict:
+    init_admin_db()
+    conn = get_connection()
+    try:
+        exists = (
+            conn.execute("SELECT 1 FROM projects WHERE slug = ?", (slug,)).fetchone()
+            is not None
+        )
+    finally:
+        conn.close()
+    if not exists:
+        raise HTTPException(status_code=404, detail="project not found")
+    comp = project_composition(slug)
+    if not comp["vk_groups"] and not comp["docs"]:
+        raise HTTPException(status_code=400, detail="проект пуст: привяжите группы или документы")
+    model = body.get("model") or "gigachat"
+    if model not in ("gigachat", "gemma", "proxyapi"):
+        raise HTTPException(status_code=400, detail="model: gigachat | gemma | proxyapi")
+    extractor = body.get("extractor") or "transformer"
+    if extractor not in ("legacy", "transformer"):
+        raise HTTPException(status_code=400, detail="extractor: legacy | transformer")
+    job = _jobs.create_job("index", project_slug=slug)
+    argv = _jobs.python_module_cmd("backend.admin.run_index", slug) + [
+        "--model",
+        model,
+        "--extractor",
+        extractor,
+        "--min-date",
+        str(body.get("min_date") or ""),
+    ]
+    if body.get("force"):
+        argv.append("--force")
+    bg.add_task(_jobs.run_command_job, job["id"], argv)
+    return {"job_id": job["id"], "status": "queued"}
+
+
+@router.get("/api/v1/admin/projects/{slug}/stats")
+async def admin_project_stats(slug: str, _: dict = Depends(verify_admin_session)) -> dict:
+    init_admin_db()
+    conn = get_connection()
+    try:
+        exists = (
+            conn.execute("SELECT 1 FROM projects WHERE slug = ?", (slug,)).fetchone()
+            is not None
+        )
+    finally:
+        conn.close()
+    if not exists:
+        raise HTTPException(status_code=404, detail="project not found")
+    return project_stats(slug)

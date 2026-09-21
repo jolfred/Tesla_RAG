@@ -176,6 +176,12 @@ export function DocsTab(): React.JSX.Element {
 export function ProjectsTab(): React.JSX.Element {
   const [list, setList] = useState<{ slug: string; name: string; description: string }[]>([])
   const [detail, setDetail] = useState<AdminProjectDetail | null>(null)
+  const [stats, setStats] = useState<Record<string, { n: number; r: number; q: number; err: string }>>({})
+  const [idxModel, setIdxModel] = useState('gigachat')
+  const [idxExtractor, setIdxExtractor] = useState('transformer')
+  const [idxMinDate, setIdxMinDate] = useState('')
+  const [idxForce, setIdxForce] = useState(false)
+  const [jobsTick, setJobsTick] = useState(0)
   const [slug, setSlug] = useState('')
   const [name, setName] = useState('')
   const [err, setErr] = useState('')
@@ -229,6 +235,36 @@ export function ProjectsTab(): React.JSX.Element {
     }
   }
 
+  const openDetail = async (s: string): Promise<void> => {
+    setErr('')
+    try {
+      const [d, st] = await Promise.all([adminApi.projectDetail(s), adminApi.projectStats(s)])
+      setDetail(d)
+      setStats((prev) => ({
+        ...prev,
+        [s]: { n: st.neo4j_nodes, r: st.neo4j_relations, q: st.qdrant_points, err: st.error },
+      }))
+    } catch (e) {
+      setErr(errText(e))
+    }
+  }
+
+  const index = async (): Promise<void> => {
+    if (!detail) return
+    setErr('')
+    try {
+      await adminApi.indexProject(detail.slug, {
+        model: idxModel,
+        extractor: idxExtractor,
+        min_date: idxMinDate,
+        force: idxForce,
+      })
+      setJobsTick((n) => n + 1)
+    } catch (e) {
+      setErr(errText(e))
+    }
+  }
+
   return (
     <div>
       <div className="ta-card">
@@ -263,7 +299,7 @@ export function ProjectsTab(): React.JSX.Element {
                   <strong>{p.name}</strong> <span className="ta-muted">{p.slug}</span>
                 </td>
                 <td>
-                  <button className="ta-btn secondary" onClick={() => void adminApi.projectDetail(p.slug).then(setDetail).catch((e: unknown) => setErr(errText(e)))}>
+                  <button className="ta-btn secondary" onClick={() => void openDetail(p.slug)}>
                     Состав
                   </button>{' '}
                   <button className="ta-btn danger" onClick={() => void remove(p.slug)}>
@@ -279,6 +315,42 @@ export function ProjectsTab(): React.JSX.Element {
       {detail && (
         <div className="ta-card">
           <h3 style={{ margin: '0 0 8px' }}>Состав: {detail.name}</h3>
+          {stats[detail.slug] && (
+            <p className="ta-muted" style={{ marginTop: 0 }}>
+              Граф: {stats[detail.slug].n} узлов, {stats[detail.slug].r} связей · Qdrant:{' '}
+              {stats[detail.slug].q} точек
+              {stats[detail.slug].err ? ` · ⚠ ${stats[detail.slug].err}` : ''}
+            </p>
+          )}
+          <div className="ta-row" style={{ marginBottom: 12 }}>
+            <select className="ta-select" value={idxModel} onChange={(e) => setIdxModel(e.target.value)}>
+              <option value="gigachat">gigachat</option>
+              <option value="gemma">gemma</option>
+              <option value="proxyapi">proxyapi</option>
+            </select>
+            <select
+              className="ta-select"
+              value={idxExtractor}
+              onChange={(e) => setIdxExtractor(e.target.value)}
+            >
+              <option value="transformer">transformer (v2)</option>
+              <option value="legacy">legacy</option>
+            </select>
+            <input
+              className="ta-input"
+              value={idxMinDate}
+              onChange={(e) => setIdxMinDate(e.target.value)}
+              placeholder="min-date (пусто = все)"
+              style={{ width: 170 }}
+            />
+            <label style={{ fontSize: 14 }}>
+              <input type="checkbox" checked={idxForce} onChange={(e) => setIdxForce(e.target.checked)} />{' '}
+              force
+            </label>
+            <button className="ta-btn" onClick={() => void index()}>
+              Индексировать проект
+            </button>
+          </div>
           {detail.items.length === 0 ? (
             <p className="ta-muted">Пусто. Привяжите документы на вкладке «Документы», группы — на вкладке «VK-группы».</p>
           ) : (
@@ -309,6 +381,8 @@ export function ProjectsTab(): React.JSX.Element {
           )}
         </div>
       )}
+
+      <JobsBlock refreshKey={jobsTick} />
     </div>
   )
 }
