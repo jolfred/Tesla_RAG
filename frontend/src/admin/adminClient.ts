@@ -149,4 +149,17 @@ export const adminApi = {
       calls: { title: string; text: string }[] | null
       trace_id: string | null
     }>('/api/v1/admin/chat', { method: 'POST', body: JSON.stringify({ question, project_slug }) }),
+  prompts: () =>
+    req<{
+      prompts: { key: string; title: string; text: string; custom: boolean; updated_at: string }[]
+    }>('/api/v1/admin/prompts'),
+  setPrompt: (key: string, text: string) =>
+    req<{ ok: boolean }>(`/api/v1/admin/prompts/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ text }),
+    }),
+  resetPrompt: (key: string) =>
+    req<{ ok: boolean; text: string }>(`/api/v1/admin/prompts/${encodeURIComponent(key)}/reset`, {
+      method: 'POST',
+    }),
 }

@@ -6,12 +6,14 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
 
 from backend.config import STORAGE_DIR
 
-ADMIN_DB = STORAGE_DIR / "admin.db"
+# TESLA_ADMIN_DB — override для тестов (conftest.py), иначе storage/admin.db.
+ADMIN_DB = Path(os.getenv("TESLA_ADMIN_DB", "") or (STORAGE_DIR / "admin.db"))
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (

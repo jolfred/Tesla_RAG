@@ -14,6 +14,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 
 from backend.admin import jobs as _jobs
 from backend.admin import projects as _projects
+from backend.admin import prompts as _prompts
 from backend.admin.db import get_connection, init_admin_db
 from backend.admin.groups import append_link, group_statuses
 from backend.admin.indexing import project_composition, project_stats
@@ -386,3 +387,31 @@ async def admin_chat(body: dict, _: dict = Depends(verify_admin_session)) -> dic
         "calls": result.get("calls"),
         "trace_id": result.get("trace_id"),
     }
+
+
+# --- Промпты (шаг 5) ---
+
+
+@router.get("/api/v1/admin/prompts")
+async def admin_prompts(_: dict = Depends(verify_admin_session)) -> dict:
+    return {"prompts": _prompts.list_prompts()}
+
+
+@router.put("/api/v1/admin/prompts/{key}")
+async def admin_set_prompt(
+    key: str, body: dict, _: dict = Depends(verify_admin_session)
+) -> dict:
+    try:
+        _prompts.set_prompt(key, body.get("text", ""))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@router.post("/api/v1/admin/prompts/{key}/reset")
+async def admin_reset_prompt(key: str, _: dict = Depends(verify_admin_session)) -> dict:
+    try:
+        _prompts.reset_prompt(key)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "text": _prompts.defaults()[key]}

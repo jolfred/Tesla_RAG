@@ -1,7 +1,8 @@
 from openai import OpenAI
 
+from backend.admin.prompts import get_prompt as _get_prompt
 from backend.indexer.logger import setup_indexer_logger
-from backend.indexer.prompts import SYSTEM_PROMPT, build_post_prompt
+from backend.indexer.prompts import build_post_prompt
 from backend.indexer.schemas import GraphExtractionResult
 from backend.utils.gemma_client import GemmaClient
 from backend.utils.gigachat_client import GigaChatClient
@@ -47,7 +48,7 @@ def extract_graph_from_post(
 
     try:
         data = extractor.extract_json(
-            SYSTEM_PROMPT, build_post_prompt(post), model=getattr(extractor, "_model", None) or None
+            _get_prompt("extract_system"), build_post_prompt(post), model=getattr(extractor, "_model", None) or None
         )
         result = GraphExtractionResult.model_validate(data)
         logger.info(

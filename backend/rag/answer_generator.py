@@ -1,3 +1,4 @@
+from backend.admin.prompts import get_prompt as _get_prompt
 from backend.config import LLM_PROVIDER
 from backend.rag.renderers import fmt_edges, fmt_facts, post_stamp
 from backend.utils.gigachat_client import GigaChatClient
@@ -104,7 +105,7 @@ class AnswerGenerator:
         try:
             narrative = client.chat(
                 [
-                    {"role": "system", "content": NARRATIVE_PROMPT},
+                    {"role": "system", "content": _get_prompt("answer_narrative")},
                     {"role": "user", "content": user_msg},
                 ],
                 temperature=0.2,
@@ -137,9 +138,9 @@ class AnswerGenerator:
         if client is None:
             return "Ошибка: LLM недоступна. Проверьте настройки провайдера."
 
-        system_prompt = BASE_PROMPT
+        system_prompt = _get_prompt("answer_base")
         if mode == "global":
-            system_prompt += GLOBAL_EXTRAS
+            system_prompt += _get_prompt("answer_global_extra")
 
         sections = []
         blocks: dict[str, str] = {}

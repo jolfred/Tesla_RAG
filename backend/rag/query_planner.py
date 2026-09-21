@@ -21,6 +21,7 @@ org_norm_id — norm_id существующего узла или None.
 
 from __future__ import annotations
 
+from backend.admin.prompts import get_prompt as _get_prompt
 from backend.common.canon import normalize_id
 from backend.rag.query_schemas import (
     INTENT_SCHEMAS,
@@ -158,7 +159,7 @@ def classify_and_plan(
     inner: list = []
     try:
         data = client.extract_json(
-            PLAN_PROMPT, question, schema=PLAN_SCHEMA,
+            _get_prompt("plan_prompt"), question, schema=PLAN_SCHEMA,
             max_retries=1, trace_sink=inner,
         )
     except Exception as e:

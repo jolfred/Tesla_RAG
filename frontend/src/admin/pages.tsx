@@ -735,3 +735,136 @@ export function ChatTab(): React.JSX.Element {
     </div>
   )
 }
+
+interface AdminPrompt {
+  key: string
+  title: string
+  text: string
+  custom: boolean
+  updated_at: string
+}
+
+export function PromptsTab(): React.JSX.Element {
+  const [prompts, setPrompts] = useState<AdminPrompt[]>([])
+  const [sel, setSel] = useState('')
+  const [text, setText] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [saved, setSaved] = useState('')
+
+  const reload = useCallback(async (keep?: string) => {
+    setLoading(true)
+    setErr('')
+    try {
+      const p = await adminApi.prompts()
+      setPrompts(p.prompts)
+      const target = keep ?? sel
+      const found = p.prompts.find((x) => x.key === target) ?? p.prompts[0]
+      if (found) {
+        setSel(found.key)
+        setText(found.text)
+      }
+    } catch (e) {
+      setErr(errText(e))
+    } finally {
+      setLoading(false)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    void reload()
+  }, [reload])
+
+  const pick = (key: string): void => {
+    setSel(key)
+    setSaved('')
+    const found = prompts.find((x) => x.key === key)
+    if (found) setText(found.text)
+  }
+
+  const save = async (): Promise<void> => {
+    setBusy(true)
+    setErr('')
+    setSaved('')
+    try {
+      await adminApi.setPrompt(sel, text)
+      setSaved('Сохранено — применится к следующим запросам и задачам без рестарта.')
+      await reload(sel)
+    } catch (e) {
+      setErr(errText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const reset = async (): Promise<void> => {
+    setBusy(true)
+    setErr('')
+    setSaved('')
+    try {
+      const r = await adminApi.resetPrompt(sel)
+      setText(r.text)
+      setSaved('Сброшено к дефолту из кода.')
+      await reload(sel)
+    } catch (e) {
+      setErr(errText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const active = prompts.find((x) => x.key === sel)
+
+  return (
+    <div>
+      <div className="ta-card">
+        <p className="ta-muted" style={{ marginTop: 0 }}>
+          Промпты всех уровней генерации. «Изменён» = override из БД, иначе дефолт из кода.
+          {loading ? '' : ''}
+        </p>
+        {loading ? (
+          <p className="ta-muted">Загрузка…</p>
+        ) : (
+          <div className="ta-row">
+            {prompts.map((p) => (
+              <button
+                key={p.key}
+                className={p.key === sel ? 'ta-btn' : 'ta-btn secondary'}
+                onClick={() => pick(p.key)}
+              >
+                {p.title}
+                {p.custom ? ' ●' : ''}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {active && (
+        <div className="ta-card">
+          <h3 style={{ margin: '0 0 8px' }}>
+            {active.title} {active.custom ? <span className="ta-pill">изменён</span> : <span className="ta-pill">дефолт</span>}
+          </h3>
+          <textarea
+            className="ta-textarea"
+            style={{ minHeight: 320 }}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <div className="ta-row" style={{ marginTop: 8 }}>
+            <button className="ta-btn" onClick={() => void save()} disabled={busy}>
+              Сохранить
+            </button>
+            <button className="ta-btn secondary" onClick={() => void reset()} disabled={busy}>
+              Сбросить к дефолту
+            </button>
+          </div>
+          {err && <p className="ta-error">{err}</p>}
+          {saved && <p style={{ color: '#067647', fontSize: 14 }}>{saved}</p>}
+        </div>
+      )}
+    </div>
+  )
+}
