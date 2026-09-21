@@ -1,8 +1,9 @@
 import type { JSX } from 'react'
 
 import type { AdminTab } from './adminTypes'
+import { DocsTab, ProjectsTab } from './pages'
 
-// Заглушки шагов 1–7: каждый таб заменяется полноценной страницей
+// Заглушки шагов 2–7: каждый таб заменяется полноценной страницей
 // своим шагом, интерфейс AdminApp не меняется.
 function Stub({ text }: { text: string }): JSX.Element {
   return (
@@ -12,16 +13,8 @@ function Stub({ text }: { text: string }): JSX.Element {
   )
 }
 
-export function DocsTab(): JSX.Element {
-  return <Stub text="Шаг 1: загрузка документов и список уже загруженных." />
-}
-
 export function GroupsTab(): JSX.Element {
   return <Stub text="Шаг 2: запуск парсера по VK-группам и список спарсенного." />
-}
-
-export function ProjectsTab(): JSX.Element {
-  return <Stub text="Шаг 3: проекты, группировка файлов/групп, индексация по проекту." />
 }
 
 export function ChatTab(): JSX.Element {
