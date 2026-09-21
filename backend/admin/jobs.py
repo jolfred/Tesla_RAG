@@ -1,12 +1,14 @@
-"""Фоновые задачи админки: запуск CLI-скриптов сабпроцессом с логом в файл.
+"""Очередь задач админки: «добавить → поправить → запустить».
 
-Без Celery/Redis: FastAPI BackgroundTasks + таблица jobs + лог storage/logs/.
-Статус обновляется в БД по завершении. Ключи подставляются в env
+Без Celery/Redis: таблица jobs (queued/running/done/error) + запуск
+сабпроцесса через FastAPI BackgroundTasks + лог storage/logs/.
+Одновременно бежит не больше одной задачи. Ключи подставляются в env
 сабпроцесса из admin.db (без рестарта API).
 """
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -23,12 +25,23 @@ logger = setup_logger("admin_jobs")
 
 LOGS_DIR = STORAGE_DIR / "logs"
 
+# kind -> человеческое описание шаблона
+KINDS = ("scrape_posts", "scrape_meta", "index")
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def create_job(kind: str, project_slug: str = "") -> dict:
+def create_job(
+    kind: str,
+    project_slug: str = "",
+    label: str = "",
+    params: dict | None = None,
+) -> dict:
+    """Только положить в очередь (не запускать)."""
+    if kind not in KINDS:
+        raise ValueError(f"unknown kind: {kind}")
     init_admin_db()
     job_id = uuid.uuid4().hex[:12]
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -36,23 +49,33 @@ def create_job(kind: str, project_slug: str = "") -> dict:
     conn = get_connection()
     try:
         conn.execute(
-            "INSERT INTO jobs (id, kind, project_slug, status, log_path) VALUES (?, ?, ?, 'queued', ?)",
-            (job_id, kind, project_slug, str(log_path)),
+            "INSERT INTO jobs (id, kind, project_slug, status, log_path, label, params)"
+            " VALUES (?, ?, ?, 'queued', ?, ?, ?)",
+            (job_id, kind, project_slug, str(log_path), label, json.dumps(params or {})),
         )
         conn.commit()
     finally:
         conn.close()
-    return {"id": job_id, "kind": kind, "log_path": str(log_path)}
+    return {"id": job_id, "kind": kind, "status": "queued", "log_path": str(log_path)}
 
 
-def list_jobs(limit: int = 30) -> list[dict]:
+def _row_to_job(row) -> dict:
+    job = dict(row)
+    try:
+        job["params"] = json.loads(job.get("params") or "{}")
+    except Exception:
+        job["params"] = {}
+    return job
+
+
+def list_jobs(limit: int = 50) -> list[dict]:
     init_admin_db()
     conn = get_connection()
     try:
         rows = conn.execute(
             "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,)
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [_row_to_job(r) for r in rows]
     finally:
         conn.close()
 
@@ -64,13 +87,132 @@ def get_job(job_id: str) -> dict | None:
         row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         if row is None:
             return None
-        job = dict(row)
+        job = _row_to_job(row)
         try:
-            text = Path(job["log_path"]).read_text(encoding="utf-8", errors="replace")
-            job["log_tail"] = "\n".join(text.splitlines()[-40:])
+            lines = Path(job["log_path"]).read_text(encoding="utf-8", errors="replace").splitlines()
+            job["log_tail"] = "\n".join(lines[-60:])
+            job["log_lines"] = len(lines)
         except OSError:
             job["log_tail"] = ""
+            job["log_lines"] = 0
         return job
+    finally:
+        conn.close()
+
+
+def any_running(except_id: str = "") -> bool:
+    init_admin_db()
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT id FROM jobs WHERE status = 'running' AND id <> ? LIMIT 1",
+            (except_id,),
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
+def update_queued_job(job_id: str, label: str | None, params: dict | None) -> dict:
+    """Правка задачи, пока она в очереди. Запущенные/готовые не трогаем."""
+    job = get_job(job_id)
+    if job is None:
+        raise KeyError(job_id)
+    if job["status"] != "queued":
+        raise ValueError("менять можно только задачу в очереди")
+    if params is not None:
+        _check_params(job["kind"], params)
+    conn = get_connection()
+    try:
+        if label is not None:
+            conn.execute("UPDATE jobs SET label = ? WHERE id = ?", (label, job_id))
+        if params is not None:
+            conn.execute(
+                "UPDATE jobs SET params = ? WHERE id = ?",
+                (json.dumps(params), job_id),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    return get_job(job_id) or job
+
+
+def delete_job(job_id: str) -> None:
+    job = get_job(job_id)
+    if job is None:
+        raise KeyError(job_id)
+    if job["status"] == "running":
+        raise ValueError("выполняющуюся задачу удалить нельзя")
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def prune_finished() -> int:
+    init_admin_db()
+    conn = get_connection()
+    try:
+        cur = conn.execute("DELETE FROM jobs WHERE status IN ('done', 'error')")
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def _check_params(kind: str, params: dict) -> None:
+    if kind in ("scrape_posts", "scrape_meta"):
+        if not (params.get("domain") or "").strip():
+            raise ValueError("пустой domain")
+        limit = int(params.get("limit") or 0)
+        if limit < 0:
+            raise ValueError("limit >= 0")
+    elif kind == "index":
+        if params.get("model") not in ("gigachat", "gemma", "proxyapi"):
+            raise ValueError("model: gigachat | gemma | proxyapi")
+        if params.get("extractor") not in ("legacy", "transformer"):
+            raise ValueError("extractor: legacy | transformer")
+    else:
+        raise ValueError(f"unknown kind: {kind}")
+
+
+def build_argv(job: dict) -> list[str]:
+    """Команда запуска из kind+params. Бросает ValueError, если собрать нельзя."""
+    kind = job["kind"]
+    params = job.get("params") or {}
+    _check_params(kind, params)
+    if kind in ("scrape_posts", "scrape_meta"):
+        from backend.admin.groups import group_statuses
+
+        urls = {g["domain"]: g["url"] for g in group_statuses()}
+        domain = params["domain"].strip()
+        if domain not in urls:
+            raise ValueError(f"группы '{domain}' нет в group_links.txt")
+        argv = python_module_cmd("scraper.main", "--url", urls[domain])
+        if kind == "scrape_meta":
+            argv.append("--meta")
+        elif int(params.get("limit") or 0) > 0:
+            argv += ["--limit", str(int(params["limit"]))]
+        return argv
+    # kind == "index"
+    slug = (job.get("project_slug") or params.get("slug") or "").strip()
+    if not slug:
+        raise ValueError("пустой проект")
+    argv = python_module_cmd("backend.admin.run_index", slug) + [
+        "--model", params["model"],
+        "--extractor", params["extractor"],
+        "--min-date", str(params.get("min_date") or ""),
+    ]
+    if params.get("force"):
+        argv.append("--force")
+    return argv
+    conn = get_connection()
+    try:
+        cols = ", ".join(f"{k} = ?" for k in fields)
+        conn.execute(f"UPDATE jobs SET {cols} WHERE id = ?", (*fields.values(), job_id))
+        conn.commit()
     finally:
         conn.close()
 
@@ -122,7 +264,16 @@ def run_command_job(job_id: str, argv: list[str]) -> None:
         if proc.returncode == 0:
             _set(job_id, status="done", finished_at=_now())
         else:
-            _set(job_id, status="error", error=f"exit {proc.returncode}", finished_at=_now())
+            # В ошибку кладём и последнюю строку лога — причина видна
+            # сразу в списке, без открытия лога.
+            tail = ""
+            try:
+                lines = Path(log_path).read_text(encoding="utf-8", errors="replace").splitlines()
+                tail = lines[-1][-300:] if lines else ""
+            except OSError:
+                pass
+            err = f"exit {proc.returncode}" + (f": {tail}" if tail else "")
+            _set(job_id, status="error", error=err[:500], finished_at=_now())
     except Exception as e:
         logger.error("job %s failed: %s", job_id, e)
         _set(job_id, status="error", error=str(e)[:500], finished_at=_now())

@@ -5,6 +5,7 @@
 export type AdminTab =
   | 'docs'
   | 'groups'
+  | 'queue'
   | 'projects'
   | 'chat'
   | 'prompts'
@@ -26,7 +27,8 @@ export interface AdminStatus {
 
 export const ADMIN_TABS: { id: AdminTab; title: string; hint: string }[] = [
   { id: 'docs', title: 'Документы', hint: 'Загрузка и список (шаг 1)' },
-  { id: 'groups', title: 'VK-группы', hint: 'Парсер и статусы (шаг 2)' },
+  { id: 'groups', title: 'VK-группы', hint: 'Группы, спарсенное, кнопки «в очередь»' },
+  { id: 'queue', title: 'Очередь', hint: 'Что запускать, куда и с какими параметрами' },
   { id: 'projects', title: 'Проекты', hint: 'Группировка и индексация (шаг 3)' },
   { id: 'chat', title: 'Тест чата', hint: 'Проверка ответов (шаг 4)' },
   { id: 'prompts', title: 'Промпты', hint: 'Редактор промптов (шаг 5)' },

@@ -66,7 +66,17 @@ export interface AdminJob {
   error: string
   created_at: string
   finished_at: string
+  label: string
+  params: Record<string, unknown>
   log_tail?: string
+  log_lines?: number
+}
+
+export const STATUS_RU: Record<string, string> = {
+  queued: 'В очереди',
+  running: 'Выполняется',
+  done: 'Готово',
+  error: 'Ошибка',
 }
 
 export const adminApi = {
@@ -132,13 +142,25 @@ export const adminApi = {
   groups: () => req<{ groups: AdminGroup[] }>('/api/v1/admin/groups'),
   addGroup: (url: string) =>
     req<AdminGroup>('/api/v1/admin/groups', { method: 'POST', body: JSON.stringify({ url }) }),
-  scrapeGroup: (domain: string, meta_only: boolean) =>
-    req<{ job_id: string; status: string }>(`/api/v1/admin/groups/${encodeURIComponent(domain)}/scrape`, {
+  queueScrape: (domain: string, task: 'posts' | 'meta', limit: number) =>
+    req<{ job_id: string; status: string }>(`/api/v1/admin/groups/${encodeURIComponent(domain)}/queue`, {
       method: 'POST',
-      body: JSON.stringify({ meta_only }),
+      body: JSON.stringify({ task, limit }),
     }),
   jobs: () => req<{ jobs: AdminJob[] }>('/api/v1/admin/jobs'),
   job: (id: string) => req<AdminJob>(`/api/v1/admin/jobs/${encodeURIComponent(id)}`),
+  updateJob: (id: string, body: { label?: string; params?: Record<string, unknown> }) =>
+    req<AdminJob>(`/api/v1/admin/jobs/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  deleteJob: (id: string) =>
+    req<{ ok: boolean }>(`/api/v1/admin/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  startJob: (id: string) =>
+    req<{ job_id: string; status: string }>(`/api/v1/admin/jobs/${encodeURIComponent(id)}/start`, {
+      method: 'POST',
+    }),
+  pruneJobs: () => req<{ removed: number }>('/api/v1/admin/jobs/prune', { method: 'POST' }),
   adminChat: (question: string, project_slug: string) =>
     req<{
       answer: string

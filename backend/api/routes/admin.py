@@ -246,25 +246,29 @@ async def admin_add_group(body: dict, _: dict = Depends(verify_admin_session)) -
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/api/v1/admin/groups/{domain}/scrape", status_code=202)
-async def admin_scrape_group(
+@router.post("/api/v1/admin/groups/{domain}/queue", status_code=201)
+async def admin_queue_scrape(
     domain: str,
     body: dict,
-    bg: BackgroundTasks,
     _: dict = Depends(verify_admin_session),
 ) -> dict:
+    """Положить скрап в очередь (не запускать). task: posts | meta."""
     urls = {g["domain"]: g["url"] for g in group_statuses()}
     if domain not in urls:
         raise HTTPException(status_code=404, detail="group not in group_links.txt")
-    limit = int(body.get("limit") or 0)
-    meta_only = bool(body.get("meta_only"))
-    job = _jobs.create_job("scrape_meta" if meta_only else "scrape")
-    argv = _jobs.python_module_cmd("scraper.main", "--url", urls[domain])
-    if meta_only:
-        argv.append("--meta")
-    elif limit > 0:
-        argv += ["--limit", str(limit)]
-    bg.add_task(_jobs.run_command_job, job["id"], argv)
+    task = body.get("task") or "posts"
+    if task not in ("posts", "meta"):
+        raise HTTPException(status_code=400, detail="task: posts | meta")
+    try:
+        limit = int(body.get("limit") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="limit — число")
+    kind = "scrape_meta" if task == "meta" else "scrape_posts"
+    label = f"Мета {domain}" if task == "meta" else f"Посты {domain}" + (f" (лимит {limit})" if limit else "")
+    try:
+        job = _jobs.create_job(kind, label=label, params={"domain": domain, "limit": limit})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {"job_id": job["id"], "status": "queued"}
 
 
@@ -281,16 +285,66 @@ async def admin_job(job_id: str, _: dict = Depends(verify_admin_session)) -> dic
     return job
 
 
+@router.patch("/api/v1/admin/jobs/{job_id}")
+async def admin_update_job(
+    job_id: str, body: dict, _: dict = Depends(verify_admin_session)
+) -> dict:
+    try:
+        return _jobs.update_queued_job(job_id, body.get("label"), body.get("params"))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="job not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/api/v1/admin/jobs/{job_id}")
+async def admin_delete_job(job_id: str, _: dict = Depends(verify_admin_session)) -> dict:
+    try:
+        _jobs.delete_job(job_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="job not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@router.post("/api/v1/admin/jobs/prune")
+async def admin_prune_jobs(_: dict = Depends(verify_admin_session)) -> dict:
+    return {"removed": _jobs.prune_finished()}
+
+
+@router.post("/api/v1/admin/jobs/{job_id}/start", status_code=202)
+async def admin_start_job(
+    job_id: str, bg: BackgroundTasks, _: dict = Depends(verify_admin_session)
+) -> dict:
+    job = _jobs.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    if job["status"] == "running":
+        raise HTTPException(status_code=409, detail="задача уже выполняется")
+    if job["status"] not in ("queued", "done", "error"):
+        raise HTTPException(status_code=400, detail=f"нельзя запустить из статуса {job['status']}")
+    if _jobs.any_running():
+        raise HTTPException(status_code=409, detail="уже выполняется другая задача — дождитесь её")
+    try:
+        argv = _jobs.build_argv(job)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    _jobs._set(job_id, status="running", error="")
+    bg.add_task(_jobs.run_command_job, job_id, argv)
+    return {"job_id": job_id, "status": "running"}
+
+
 # --- Индексация проекта в свой namespace (шаг 3) ---
 
 
-@router.post("/api/v1/admin/projects/{slug}/index", status_code=202)
+@router.post("/api/v1/admin/projects/{slug}/index", status_code=201)
 async def admin_index_project(
     slug: str,
     body: dict,
-    bg: BackgroundTasks,
     _: dict = Depends(verify_admin_session),
 ) -> dict:
+    """Положить индексацию проекта в очередь (не запускать)."""
     init_admin_db()
     conn = get_connection()
     try:
@@ -311,18 +365,16 @@ async def admin_index_project(
     extractor = body.get("extractor") or "transformer"
     if extractor not in ("legacy", "transformer"):
         raise HTTPException(status_code=400, detail="extractor: legacy | transformer")
-    job = _jobs.create_job("index", project_slug=slug)
-    argv = _jobs.python_module_cmd("backend.admin.run_index", slug) + [
-        "--model",
-        model,
-        "--extractor",
-        extractor,
-        "--min-date",
-        str(body.get("min_date") or ""),
-    ]
-    if body.get("force"):
-        argv.append("--force")
-    bg.add_task(_jobs.run_command_job, job["id"], argv)
+    min_date = str(body.get("min_date") or "")
+    force = bool(body.get("force"))
+    label = f"Индекс {slug} [{model}/{extractor}]" + (" +force" if force else "")
+    job = _jobs.create_job(
+        "index",
+        project_slug=slug,
+        label=label,
+        params={"slug": slug, "model": model, "extractor": extractor,
+                "min_date": min_date, "force": force},
+    )
     return {"job_id": job["id"], "status": "queued"}
 
 

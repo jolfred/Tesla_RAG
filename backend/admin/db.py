@@ -47,7 +47,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     log_path TEXT NOT NULL DEFAULT '',
     error TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    finished_at TEXT NOT NULL DEFAULT ''
+    finished_at TEXT NOT NULL DEFAULT '',
+    label TEXT NOT NULL DEFAULT '',
+    params TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS documents_meta (
     doc_id TEXT PRIMARY KEY,
@@ -72,6 +74,12 @@ def init_admin_db(db_path: Path | str = ADMIN_DB) -> Path:
     conn = get_connection(path)
     try:
         conn.executescript(_SCHEMA)
+        # Миграции без Alembic: доклеиваем колонки, которых нет.
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        if "label" not in cols:
+            conn.execute("ALTER TABLE jobs ADD COLUMN label TEXT NOT NULL DEFAULT ''")
+        if "params" not in cols:
+            conn.execute("ALTER TABLE jobs ADD COLUMN params TEXT NOT NULL DEFAULT ''")
         conn.commit()
     finally:
         conn.close()

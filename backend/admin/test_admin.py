@@ -115,6 +115,44 @@ def test_load_doc_posts(tmp_path, monkeypatch):
     assert posts[0]["published_at"]
 
 
+def test_queue_flow(client):
+    import backend.admin.jobs as jobsmod
+
+    # скрап в очередь (rso_tesla есть в group_links.txt)
+    r = client.post("/api/v1/admin/groups/rso_tesla/queue", json={"task": "posts", "limit": 5})
+    assert r.status_code == 201
+    jid = r.json()["job_id"]
+    assert client.post("/api/v1/admin/groups/rso_tesla/queue", json={"task": "x"}).status_code == 400
+    assert client.post("/api/v1/admin/groups/none/queue", json={"task": "posts"}).status_code == 404
+
+    # правка queued-задачи
+    r = client.patch(f"/api/v1/admin/jobs/{jid}", json={"params": {"domain": "rso_tesla", "limit": 7}})
+    assert r.status_code == 200
+    assert r.json()["params"]["limit"] == 7
+    assert client.patch("/api/v1/admin/jobs/none", json={}).status_code == 404
+
+    # индекс в очередь
+    client.post("/api/v1/admin/projects", json={"slug": "qp", "name": "QP"})
+    client.post("/api/v1/admin/projects/qp/items", json={"item_type": "vk_group", "item_id": "rso_tesla"})
+    r = client.post("/api/v1/admin/projects/qp/index", json={"model": "gigachat"})
+    assert r.status_code == 201
+    idx_id = r.json()["job_id"]
+
+    # занято другой выполняющейся
+    jobsmod._set(jid, status="running")
+    assert client.post(f"/api/v1/admin/jobs/{idx_id}/start").status_code == 409
+    assert client.post(f"/api/v1/admin/jobs/{jid}/start").status_code == 409
+    # выполняющуюся удалить нельзя
+    assert client.delete(f"/api/v1/admin/jobs/{jid}").status_code == 400
+    jobsmod._set(jid, status="error", error="boom")
+    # править не-queued нельзя
+    assert client.patch(f"/api/v1/admin/jobs/{jid}", json={"label": "x"}).status_code == 400
+
+    # prune чистит done/error
+    assert client.post("/api/v1/admin/jobs/prune").json()["removed"] == 1
+    assert client.delete(f"/api/v1/admin/jobs/{idx_id}").json() == {"ok": True}
+
+
 def test_settings_api(client):
     body = client.get("/api/v1/admin/settings").json()["settings"]
     keys = [s["key"] for s in body]

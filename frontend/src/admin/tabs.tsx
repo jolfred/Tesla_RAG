@@ -1,7 +1,7 @@
 import type { JSX } from 'react'
 
 import type { AdminTab } from './adminTypes'
-import { ChatTab, DocsTab, GraphsTab, GroupsTab, KeysTab, PromptsTab, ProjectsTab } from './pages'
+import { ChatTab, DocsTab, GraphsTab, GroupsTab, KeysTab, PromptsTab, ProjectsTab, QueueTab } from './pages'
 
 export function tabContent(tab: AdminTab): JSX.Element {
   switch (tab) {
@@ -9,6 +9,8 @@ export function tabContent(tab: AdminTab): JSX.Element {
       return <DocsTab />
     case 'groups':
       return <GroupsTab />
+    case 'queue':
+      return <QueueTab />
     case 'projects':
       return <ProjectsTab />
     case 'chat':

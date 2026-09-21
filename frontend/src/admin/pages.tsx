@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 
 import { adminApi } from './adminClient'
 import type { AdminDocument, AdminGroup, AdminJob, AdminProjectDetail } from './adminClient'
-import { AdminApiError } from './adminClient'
+import { AdminApiError, STATUS_RU } from './adminClient'
 
 function errText(e: unknown): string {
   if (e instanceof AdminApiError) {
@@ -21,6 +21,25 @@ function fmtSize(n: number): string {
   if (n > 1048576) return `${(n / 1048576).toFixed(1)} МБ`
   if (n > 1024) return `${(n / 1024).toFixed(0)} КБ`
   return `${n} Б`
+}
+
+const RU2LAT: Record<string, string> = {
+  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'yo', ж: 'zh', з: 'z', и: 'i',
+  й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't',
+  у: 'u', ф: 'f', х: 'h', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y',
+  ь: '', э: 'e', ю: 'yu', я: 'ya',
+}
+
+// Название -> slug: транслит, малые буквы, дефисы. Пусто -> ''.
+export function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .split('')
+    .map((ch) => RU2LAT[ch] ?? ch)
+    .join('')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
 }
 
 export function DocsTab(): React.JSX.Element {
@@ -181,11 +200,13 @@ export function ProjectsTab(): React.JSX.Element {
   const [idxExtractor, setIdxExtractor] = useState('transformer')
   const [idxMinDate, setIdxMinDate] = useState('')
   const [idxForce, setIdxForce] = useState(false)
-  const [jobsTick, setJobsTick] = useState(0)
-  const [slug, setSlug] = useState('')
   const [name, setName] = useState('')
+  const [slugManual, setSlugManual] = useState('')
+  const [slugEdit, setSlugEdit] = useState(false)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState('')
+  const slug = slugManual || slugify(name)
 
   const reload = useCallback(async (keepSlug?: string) => {
     setErr('')
@@ -212,9 +233,10 @@ export function ProjectsTab(): React.JSX.Element {
     setBusy(true)
     setErr('')
     try {
-      const p = await adminApi.createProject({ slug, name, description: '' })
-      setSlug('')
+      const p = await adminApi.createProject({ slug, name: name.trim() || slug, description: '' })
       setName('')
+      setSlugManual('')
+      setSlugEdit(false)
       await reload(p.slug)
     } catch (e) {
       setErr(errText(e))
@@ -252,6 +274,7 @@ export function ProjectsTab(): React.JSX.Element {
   const index = async (): Promise<void> => {
     if (!detail) return
     setErr('')
+    setNotice('')
     try {
       await adminApi.indexProject(detail.slug, {
         model: idxModel,
@@ -259,7 +282,7 @@ export function ProjectsTab(): React.JSX.Element {
         min_date: idxMinDate,
         force: idxForce,
       })
-      setJobsTick((n) => n + 1)
+      setNotice('Добавлено в очередь — запуск на вкладке «Очередь».')
     } catch (e) {
       setErr(errText(e))
     }
@@ -272,20 +295,41 @@ export function ProjectsTab(): React.JSX.Element {
         <div className="ta-row">
           <input
             className="ta-input"
-            value={slug}
-            onChange={(e) => setSlug(e.target.value)}
-            placeholder="slug: shtab, monolit…"
-          />
-          <input
-            className="ta-input"
+            style={{ minWidth: 260 }}
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Название"
+            placeholder="Название: Штаб, Монолит, Лига студентов…"
+            title="Человеческое название проекта"
           />
           <button className="ta-btn" onClick={() => void create()} disabled={busy || !slug}>
             Создать
           </button>
         </div>
+        <p className="ta-muted" style={{ marginBottom: 0 }}>
+          ID для графа и коллекций: <code>{slug || '—'}</code>
+          {slugEdit ? (
+            <>
+              {' '}
+              <input
+                className="ta-input"
+                style={{ width: 180 }}
+                value={slugManual}
+                onChange={(e) => setSlugManual(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                placeholder="свой id"
+              />{' '}
+              <button className="ta-btn secondary" onClick={() => { setSlugEdit(false); setSlugManual('') }}>
+                Авто
+              </button>
+            </>
+          ) : (
+            <>
+              {' '}
+              <button className="ta-btn secondary" onClick={() => { setSlugManual(slug); setSlugEdit(true) }}>
+                Изменить
+              </button>
+            </>
+          )}
+        </p>
         {err && <p className="ta-error">{err}</p>}
       </div>
 
@@ -347,10 +391,11 @@ export function ProjectsTab(): React.JSX.Element {
               <input type="checkbox" checked={idxForce} onChange={(e) => setIdxForce(e.target.checked)} />{' '}
               force
             </label>
-            <button className="ta-btn" onClick={() => void index()}>
-              Индексировать проект
+            <button className="ta-btn" onClick={() => void index()} title="Положить индексацию этого проекта в очередь (запуск — на вкладке «Очередь»)">
+              В очередь на индексацию
             </button>
           </div>
+          {notice && <p style={{ color: '#067647', fontSize: 14 }}>{notice}</p>}
           {detail.items.length === 0 ? (
             <p className="ta-muted">Пусто. Привяжите документы на вкладке «Документы», группы — на вкладке «VK-группы».</p>
           ) : (
@@ -381,8 +426,6 @@ export function ProjectsTab(): React.JSX.Element {
           )}
         </div>
       )}
-
-      <JobsBlock refreshKey={jobsTick} />
     </div>
   )
 }
@@ -392,11 +435,40 @@ function fmtDate(ts: number): string {
   return new Date(ts * 1000).toLocaleString('ru-RU')
 }
 
-export function JobsBlock({ refreshKey }: { refreshKey: number }): React.JSX.Element {
+function fmtDur(created: string, finished: string): string {
+  const t0 = Date.parse(created.replace(' ', 'T') + 'Z')
+  if (isNaN(t0)) return '—'
+  const t1 = finished ? Date.parse(finished.replace(' ', 'T') + 'Z') : Date.now()
+  if (isNaN(t1)) return '—'
+  const s = Math.max(0, Math.round((t1 - t0) / 1000))
+  if (s < 60) return `${s} c`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m} мин ${s % 60} c`
+  return `${Math.floor(m / 60)} ч ${m % 60} мин`
+}
+
+function paramsSummary(j: AdminJob): string {
+  const p = j.params ?? {}
+  if (j.kind === 'scrape_posts') {
+    const lim = Number(p.limit ?? 0)
+    return `${String(p.domain ?? '?')}${lim > 0 ? `, лимит ${lim}` : ', все посты'}`
+  }
+  if (j.kind === 'scrape_meta') return String(p.domain ?? '?')
+  if (j.kind === 'index') {
+    return `${String(p.slug ?? j.project_slug)} [${String(p.model ?? '?')}/${String(p.extractor ?? '?')}]${p.min_date ? ` от ${String(p.min_date)}` : ''}${p.force ? ' +force' : ''}`
+  }
+  return ''
+}
+
+export function QueueTab(): React.JSX.Element {
   const [jobs, setJobs] = useState<AdminJob[]>([])
   const [openLog, setOpenLog] = useState<string | null>(null)
   const [logText, setLogText] = useState('')
+  const [editing, setEditing] = useState<AdminJob | null>(null)
+  const [editLabel, setEditLabel] = useState('')
+  const [editParams, setEditParams] = useState<Record<string, string>>({})
   const [err, setErr] = useState('')
+  const [notice, setNotice] = useState('')
 
   const reload = useCallback(async () => {
     try {
@@ -408,7 +480,15 @@ export function JobsBlock({ refreshKey }: { refreshKey: number }): React.JSX.Ele
 
   useEffect(() => {
     void reload()
-  }, [reload, refreshKey])
+  }, [reload])
+
+  // Пока что-то выполняется — обновляем список сами каждые 5 секунд.
+  const running = jobs.some((j) => j.status === 'running')
+  useEffect(() => {
+    if (!running) return
+    const t = setInterval(() => void reload(), 5000)
+    return () => clearInterval(t)
+  }, [running, reload])
 
   const showLog = async (id: string): Promise<void> => {
     try {
@@ -420,54 +500,235 @@ export function JobsBlock({ refreshKey }: { refreshKey: number }): React.JSX.Ele
     }
   }
 
+  const start = async (id: string): Promise<void> => {
+    setErr('')
+    setNotice('')
+    try {
+      await adminApi.startJob(id)
+      await reload()
+    } catch (e) {
+      setErr(errText(e))
+    }
+  }
+
+  const remove = async (id: string): Promise<void> => {
+    setErr('')
+    try {
+      await adminApi.deleteJob(id)
+      if (editing?.id === id) setEditing(null)
+      await reload()
+    } catch (e) {
+      setErr(errText(e))
+    }
+  }
+
+  const prune = async (): Promise<void> => {
+    setErr('')
+    try {
+      const r = await adminApi.pruneJobs()
+      setNotice(`Убрано завершённых: ${r.removed}.`)
+      await reload()
+    } catch (e) {
+      setErr(errText(e))
+    }
+  }
+
+  const openEdit = (j: AdminJob): void => {
+    setEditing(j)
+    setEditLabel(j.label)
+    const p = j.params ?? {}
+    setEditParams({
+      limit: String(p.limit ?? 0),
+      model: String(p.model ?? 'gigachat'),
+      extractor: String(p.extractor ?? 'transformer'),
+      min_date: String(p.min_date ?? ''),
+      force: (p.force ? '1' : ''),
+    })
+  }
+
+  const saveEdit = async (): Promise<void> => {
+    if (!editing) return
+    setErr('')
+    try {
+      const params: Record<string, unknown> =
+        editing.kind === 'index'
+          ? {
+              slug: editing.project_slug || editing.params?.slug,
+              model: editParams.model,
+              extractor: editParams.extractor,
+              min_date: editParams.min_date,
+              force: editParams.force === '1',
+            }
+          : { domain: editing.params?.domain, limit: Math.max(0, parseInt(editParams.limit || '0', 10) || 0) }
+      await adminApi.updateJob(editing.id, { label: editLabel, params })
+      setEditing(null)
+      await reload()
+    } catch (e) {
+      setErr(errText(e))
+    }
+  }
+
   return (
-    <div className="ta-card">
-      <div className="ta-row" style={{ justifyContent: 'space-between' }}>
-        <h3 style={{ margin: 0 }}>Задачи</h3>
-        <button className="ta-btn secondary" onClick={() => void reload()}>
-          Обновить
-        </button>
+    <div>
+      <div className="ta-card">
+        <div className="ta-row" style={{ justifyContent: 'space-between' }}>
+          <p className="ta-muted" style={{ margin: 0 }}>
+            Сюда попадают кнопки «в очередь» из вкладок групп и проектов. Проверьте что и куда —
+            потом «Запустить». Одновременно выполняется одна задача.
+          </p>
+          <div className="ta-row">
+            <button className="ta-btn secondary" onClick={() => void reload()}>
+              Обновить
+            </button>
+            <button
+              className="ta-btn secondary"
+              onClick={() => void prune()}
+              title="Удалить из списка все готовые и упавшие задачи (файлы и графы не трогает)"
+            >
+              Убрать готовые
+            </button>
+          </div>
+        </div>
+        {err && <p className="ta-error">{err}</p>}
+        {notice && <p style={{ color: '#067647', fontSize: 14 }}>{notice}</p>}
       </div>
-      {err && <p className="ta-error">{err}</p>}
-      {jobs.length === 0 ? (
-        <p className="ta-muted">Задач пока нет.</p>
-      ) : (
-        <table className="ta-table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Тип</th>
-              <th>Проект</th>
-              <th>Статус</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {jobs.map((j) => (
-              <tr key={j.id}>
-                <td>
-                  <code>{j.id}</code>
-                </td>
-                <td>{j.kind}</td>
-                <td>{j.project_slug || '—'}</td>
-                <td>
-                  {j.status}
-                  {j.error ? ` (${j.error})` : ''}
-                </td>
-                <td>
-                  <button className="ta-btn secondary" onClick={() => void showLog(j.id)}>
-                    Лог
-                  </button>
-                </td>
+
+      <div className="ta-card">
+        {jobs.length === 0 ? (
+          <p className="ta-muted">Очередь пуста.</p>
+        ) : (
+          <table className="ta-table">
+            <thead>
+              <tr>
+                <th>Задача</th>
+                <th>Статус</th>
+                <th>Длительность</th>
+                <th></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {openLog && (
-        <div>
-          <h4 style={{ marginBottom: 4 }}>Лог {openLog}</h4>
-          <pre className="ta-log">{logText}</pre>
+            </thead>
+            <tbody>
+              {jobs.map((j) => (
+                <tr key={j.id} style={j.status === 'running' ? { background: '#f0fdf4' } : undefined}>
+                  <td>
+                    <strong>{j.label || j.kind}</strong>
+                    <br />
+                    <span className="ta-muted">{paramsSummary(j)}</span>
+                    {j.project_slug && <span className="ta-pill">{j.project_slug}</span>}
+                  </td>
+                  <td>
+                    {STATUS_RU[j.status] ?? j.status}
+                    {j.error && (
+                      <div className="ta-error" style={{ fontSize: 13 }}>
+                        {j.error}
+                      </div>
+                    )}
+                  </td>
+                  <td className="ta-muted" style={{ whiteSpace: 'nowrap' }}>
+                    {fmtDur(j.created_at, j.finished_at)}
+                  </td>
+                  <td>
+                    <div className="ta-row">
+                      {j.status !== 'running' && (
+                        <button
+                          className="ta-btn"
+                          onClick={() => void start(j.id)}
+                          disabled={running}
+                          title={running ? 'Дождитесь конца выполняющейся задачи' : 'Запустить сейчас'}
+                        >
+                          Запустить
+                        </button>
+                      )}
+                      {j.status === 'queued' && (
+                        <button className="ta-btn secondary" onClick={() => openEdit(j)} title="Поменять название и параметры до запуска">
+                          Изменить
+                        </button>
+                      )}
+                      {j.status !== 'running' && (
+                        <button className="ta-btn secondary" onClick={() => void remove(j.id)} title="Убрать из очереди (файлы и графы не трогает)">
+                          Удалить
+                        </button>
+                      )}
+                      <button className="ta-btn secondary" onClick={() => void showLog(j.id)}>
+                        Лог
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {openLog && (
+          <div>
+            <h4 style={{ marginBottom: 4 }}>Лог {openLog}</h4>
+            <pre className="ta-log">{logText}</pre>
+          </div>
+        )}
+      </div>
+
+      {editing && (
+        <div className="ta-card">
+          <h3 style={{ margin: '0 0 8px' }}>Изменить: {editing.label || editing.kind}</h3>
+          <div className="ta-row" style={{ marginBottom: 8 }}>
+            <input
+              className="ta-input"
+              style={{ minWidth: 260 }}
+              value={editLabel}
+              onChange={(e) => setEditLabel(e.target.value)}
+              placeholder="Название задачи"
+              title="Название видно только в этом списке"
+            />
+          </div>
+          {editing.kind === 'index' ? (
+            <div className="ta-row">
+              <select className="ta-select" value={editParams.model} onChange={(e) => setEditParams((v) => ({ ...v, model: e.target.value }))}>
+                <option value="gigachat">gigachat</option>
+                <option value="gemma">gemma</option>
+                <option value="proxyapi">proxyapi</option>
+              </select>
+              <select className="ta-select" value={editParams.extractor} onChange={(e) => setEditParams((v) => ({ ...v, extractor: e.target.value }))}>
+                <option value="transformer">transformer (v2)</option>
+                <option value="legacy">legacy</option>
+              </select>
+              <input
+                className="ta-input"
+                style={{ width: 150 }}
+                value={editParams.min_date}
+                onChange={(e) => setEditParams((v) => ({ ...v, min_date: e.target.value }))}
+                placeholder="min-date"
+                title="Посты старше этой даты пропускаются. Пусто = все."
+              />
+              <label style={{ fontSize: 14 }} title="Обработать все посты заново, даже уже проиндексированные">
+                <input
+                  type="checkbox"
+                  checked={editParams.force === '1'}
+                  onChange={(e) => setEditParams((v) => ({ ...v, force: e.target.checked ? '1' : '' }))}
+                />{' '}
+                force
+              </label>
+            </div>
+          ) : (
+            <div className="ta-row">
+              <input
+                className="ta-input"
+                style={{ width: 170 }}
+                type="number"
+                min={0}
+                value={editParams.limit}
+                onChange={(e) => setEditParams((v) => ({ ...v, limit: e.target.value }))}
+                title="Сколько свежих постов скачать. 0 = все доступные."
+              />
+              <span className="ta-muted">лимит постов (0 = все)</span>
+            </div>
+          )}
+          <div className="ta-row" style={{ marginTop: 8 }}>
+            <button className="ta-btn" onClick={() => void saveEdit()}>
+              Сохранить
+            </button>
+            <button className="ta-btn secondary" onClick={() => setEditing(null)}>
+              Отмена
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -481,7 +742,8 @@ export function GroupsTab(): React.JSX.Element {
   const [err, setErr] = useState('')
   const [url, setUrl] = useState('')
   const [busy, setBusy] = useState(false)
-  const [jobsTick, setJobsTick] = useState(0)
+  const [limit, setLimit] = useState('0')
+  const [notice, setNotice] = useState('')
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -515,11 +777,13 @@ export function GroupsTab(): React.JSX.Element {
     }
   }
 
-  const scrape = async (domain: string, meta_only: boolean): Promise<void> => {
+  const queue = async (domain: string, task: 'posts' | 'meta'): Promise<void> => {
     setErr('')
+    setNotice('')
     try {
-      await adminApi.scrapeGroup(domain, meta_only)
-      setJobsTick((n) => n + 1)
+      const lim = Math.max(0, parseInt(limit || '0', 10) || 0)
+      await adminApi.queueScrape(domain, task, task === 'posts' ? lim : 0)
+      setNotice(`«${domain}» добавлено в очередь — запуск на вкладке «Очередь».`)
     } catch (e) {
       setErr(errText(e))
     }
@@ -557,6 +821,19 @@ export function GroupsTab(): React.JSX.Element {
 
       <div className="ta-card">
         <h3 style={{ margin: '0 0 8px' }}>Группы ({groups.length})</h3>
+        <p className="ta-muted" style={{ marginTop: 0 }}>
+          Лимит постов для кнопок «Посты»:{' '}
+          <input
+            className="ta-input"
+            style={{ width: 90 }}
+            type="number"
+            min={0}
+            value={limit}
+            onChange={(e) => setLimit(e.target.value)}
+            title="Сколько свежих постов скачать с группы. 0 = все доступные."
+          />{' '}
+          (0 = все)
+        </p>
         {loading ? (
           <p className="ta-muted">Загрузка…</p>
         ) : (
@@ -610,11 +887,19 @@ export function GroupsTab(): React.JSX.Element {
                   </td>
                   <td>
                     <div className="ta-row">
-                      <button className="ta-btn secondary" onClick={() => void scrape(g.domain, false)}>
-                        Спарсить
+                      <button
+                        className="ta-btn secondary"
+                        onClick={() => void queue(g.domain, 'posts')}
+                        title="Скачать посты группы в storage/posts/posts_<домен>.jsonl (потом — в очередь на индексацию)"
+                      >
+                        Посты в очередь
                       </button>
-                      <button className="ta-btn secondary" onClick={() => void scrape(g.domain, true)}>
-                        Мета
+                      <button
+                        className="ta-btn secondary"
+                        onClick={() => void queue(g.domain, 'meta')}
+                        title="Мета = название, описание и контакты группы (без постов). Нужно для карточек отрядов."
+                      >
+                        Мета в очередь
                       </button>
                     </div>
                   </td>
@@ -623,9 +908,8 @@ export function GroupsTab(): React.JSX.Element {
             </tbody>
           </table>
         )}
+        {notice && <p style={{ color: '#067647', fontSize: 14 }}>{notice}</p>}
       </div>
-
-      <JobsBlock refreshKey={jobsTick} />
     </div>
   )
 }
