@@ -926,12 +926,31 @@ export function GraphsTab(): React.JSX.Element {
       url.searchParams.delete('project')
     }
     window.history.replaceState(null, '', `/admin/graphs${url.search}`)
-    if (slug) void load(slug)
-    else setData(null)
+    void load(slug)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug])
 
   const permalink = `${window.location.origin}/admin/graphs${slug ? `?project=${encodeURIComponent(slug)}` : ''}`
+  // Deep-ссылка в Neo4j Browser: редактор предзаполнен запросом ветки
+  // (?cmd=edit&arg=...), пользователю остаётся нажать Run.
+  // Если админку открыли не с localhost — хост Neo4j берём из адреса страницы.
+  const neo4jQuery = data
+    ? `MATCH (a)-[r]->(b) WHERE a.source_model = '${data.source_model}' AND b.source_model = '${data.source_model}' RETURN a, r, b LIMIT 300`
+    : ''
+  const neo4jBase = (() => {
+    if (!data) return ''
+    try {
+      const u = new URL(data.browser_url)
+      const pageHost = window.location.hostname
+      if ((u.hostname === 'localhost' || u.hostname === '127.0.0.1') && pageHost && pageHost !== 'localhost' && pageHost !== '127.0.0.1') {
+        u.hostname = pageHost
+      }
+      return u.toString().replace(/\/$/, '')
+    } catch {
+      return data.browser_url
+    }
+  })()
+  const neo4jDeep = neo4jBase ? `${neo4jBase}/browser?cmd=edit&arg=${encodeURIComponent(neo4jQuery)}` : ''
   const nodes = data?.nodes ?? []
   const R = 220
   const pos = new Map<string, { x: number; y: number }>()
@@ -961,19 +980,25 @@ export function GraphsTab(): React.JSX.Element {
           )}
         </div>
         {err && <p className="ta-error">{err}</p>}
+        {data && neo4jDeep && (
+          <div className="ta-row" style={{ margin: '12px 0' }}>
+            <a href={neo4jDeep} target="_blank" rel="noreferrer">
+              <button className="ta-btn">Открыть граф в Neo4j</button>
+            </a>
+          </div>
+        )}
+        {data && (
+          <p className="ta-muted" style={{ marginTop: 0 }}>
+            Запрос ветки (уже подставлен в Neo4j по кнопке выше):
+            <br />
+            <code>{neo4jQuery}</code>
+          </p>
+        )}
         <p className="ta-muted" style={{ marginBottom: 0 }}>
-          Отдельная ссылка на граф:{' '}
+          Ссылка на эту страницу:{' '}
           <a href={permalink} target="_blank" rel="noreferrer">
             {permalink}
           </a>
-          {data && (
-            <>
-              {' · '}
-              <a href={data.browser_url} target="_blank" rel="noreferrer">
-                Открыть в Neo4j Browser
-              </a>
-            </>
-          )}
         </p>
       </div>
 
