@@ -1,0 +1,188 @@
+/* Светлая минималистичная тема админки. Все селекторы под .tesla-admin,
+   чтобы не конфликтовать с тёмным лендингом. */
+
+.tesla-admin {
+  min-height: 100vh;
+  background: #f6f7f9;
+  color: #1a1d21;
+  font-family: Inter, Manrope, system-ui, sans-serif;
+  margin: 0;
+}
+
+.ta-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.ta-side {
+  width: 220px;
+  flex-shrink: 0;
+  background: #fff;
+  border-right: 1px solid #e5e7eb;
+  padding: 20px 12px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.ta-logo {
+  font-weight: 800;
+  font-size: 18px;
+  padding: 0 8px 4px;
+}
+
+.ta-logo small {
+  display: block;
+  font-weight: 500;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.ta-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 12px;
+}
+
+.ta-nav button {
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  color: #1a1d21;
+}
+
+.ta-nav button:hover {
+  background: #f0f2f5;
+}
+
+.ta-nav button.active {
+  background: #1a1d21;
+  color: #fff;
+}
+
+.ta-main {
+  flex: 1;
+  padding: 24px;
+  max-width: 1080px;
+}
+
+.ta-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.ta-muted {
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.ta-title {
+  font-size: 22px;
+  font-weight: 800;
+  margin: 0 0 4px;
+}
+
+.ta-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.ta-input,
+.ta-select,
+.ta-textarea {
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  background: #fff;
+  color: #1a1d21;
+}
+
+.ta-textarea {
+  width: 100%;
+  min-height: 120px;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+}
+
+.ta-btn {
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  background: #1a1d21;
+  color: #fff;
+}
+
+.ta-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ta-btn.secondary {
+  background: #eef0f3;
+  color: #1a1d21;
+}
+
+.ta-btn.danger {
+  background: #b42318;
+  color: #fff;
+}
+
+.ta-error {
+  color: #b42318;
+  font-size: 14px;
+}
+
+.ta-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.ta-table th,
+.ta-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid #eef0f3;
+}
+
+.ta-pill {
+  display: inline-block;
+  background: #eef0f3;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  margin: 0 4px 4px 0;
+}
+
+@media (max-width: 760px) {
+  .ta-shell {
+    flex-direction: column;
+  }
+
+  .ta-side {
+    width: 100%;
+    height: auto;
+    position: static;
+  }
+
+  .ta-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}

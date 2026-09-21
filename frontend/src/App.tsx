@@ -1,8 +1,13 @@
 import React, { useEffect } from 'react'
 
 import { AuthProvider } from './auth/authContext'
+import AdminApp from './admin/AdminApp'
 import teslaFavicon from './assets/logos/tesla.jpg'
 import LandingPage from './landing/LandingPage'
+
+function isAdminPath(): boolean {
+  return typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')
+}
 
 function ThemedApp(): React.JSX.Element {
   useEffect(() => {
@@ -18,6 +23,9 @@ function ThemedApp(): React.JSX.Element {
     link.href = teslaFavicon
     return () => document.body.classList.remove('tesla-landing')
   }, [])
+  if (isAdminPath()) {
+    return <AdminApp />
+  }
   return <LandingPage />
 }
 
