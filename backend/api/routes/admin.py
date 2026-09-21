@@ -415,3 +415,87 @@ async def admin_reset_prompt(key: str, _: dict = Depends(verify_admin_session)) 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True, "text": _prompts.defaults()[key]}
+
+
+# --- Графы (шаг 6): export namespace + ссылки ---
+
+
+def _browser_url() -> str:
+    from backend.config import NEO4J_URI
+
+    try:
+        host = NEO4J_URI.split("://", 1)[1].split(":")[0].split("/")[0]
+    except Exception:
+        host = "localhost"
+    return f"http://{host or 'localhost'}:7474"
+
+
+@router.get("/api/v1/admin/graph/export")
+async def admin_graph_export(
+    project_slug: str = "",
+    node_limit: int = 150,
+    edge_limit: int = 300,
+    _: dict = Depends(verify_admin_session),
+) -> dict:
+    from backend.admin.indexing import project_source_model
+    from backend.rag.planner_common import MODEL as DEFAULT_MODEL
+
+    if project_slug:
+        init_admin_db()
+        conn = get_connection()
+        try:
+            exists = (
+                conn.execute(
+                    "SELECT 1 FROM projects WHERE slug = ?", (project_slug,)
+                ).fetchone()
+                is not None
+            )
+        finally:
+            conn.close()
+        if not exists:
+            raise HTTPException(status_code=404, detail="project not found")
+        model = project_source_model(project_slug)
+    else:
+        model = DEFAULT_MODEL
+    node_limit = max(10, min(node_limit, 500))
+    edge_limit = max(10, min(edge_limit, 1000))
+    try:
+        from neo4j import GraphDatabase
+
+        from backend.config import NEO4J_PASS, NEO4J_URI, NEO4J_USER
+
+        driver = GraphDatabase.driver(
+            NEO4J_URI,
+            auth=(NEO4J_USER, NEO4J_PASS),
+            connection_timeout=3,
+            max_transaction_retry_time=5,
+        )
+        try:
+            with driver.session() as session:
+                nrows = session.run(
+                    "MATCH (n) WHERE n.source_model = $m "
+                    "RETURN coalesce(n.norm_id, n.id, n.name) AS id, "
+                    "head(labels(n)) AS label, coalesce(n.name, n.id, '') AS name "
+                    "LIMIT $lim",
+                    m=model,
+                    lim=node_limit,
+                ).data()
+                erows = session.run(
+                    "MATCH (a)-[r]->(b) "
+                    "WHERE a.source_model = $m AND b.source_model = $m "
+                    "RETURN coalesce(a.norm_id, a.id, a.name) AS a, "
+                    "type(r) AS rel, coalesce(b.norm_id, b.id, b.name) AS b "
+                    "LIMIT $lim",
+                    m=model,
+                    lim=edge_limit,
+                ).data()
+        finally:
+            driver.close()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Neo4j недоступен: {e}")
+    return {
+        "source_model": model,
+        "browser_url": _browser_url(),
+        "nodes": [{"id": str(r["id"]), "label": r["label"], "name": r["name"]} for r in nrows],
+        "edges": [{"a": str(r["a"]), "rel": r["rel"], "b": str(r["b"])} for r in erows],
+    }

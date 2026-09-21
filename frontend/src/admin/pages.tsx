@@ -868,3 +868,156 @@ export function PromptsTab(): React.JSX.Element {
     </div>
   )
 }
+
+interface GraphData {
+  source_model: string
+  browser_url: string
+  nodes: { id: string; label: string; name: string }[]
+  edges: { a: string; rel: string; b: string }[]
+}
+
+const LABEL_COLORS: Record<string, string> = {
+  Person: '#2563eb',
+  Squad: '#16a34a',
+  Organization: '#16a34a',
+  Entity: '#6b7280',
+  Event: '#dc2626',
+  Project: '#9333ea',
+  Role: '#ea580c',
+  Award: '#ca8a04',
+  Location: '#0891b2',
+  Profession: '#4d7c0f',
+}
+
+export function GraphsTab(): React.JSX.Element {
+  const [projects, setProjects] = useState<string[]>([])
+  const [slug, setSlug] = useState(
+    () => new URLSearchParams(window.location.search).get('project') ?? '',
+  )
+  const [data, setData] = useState<GraphData | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    adminApi
+      .projects()
+      .then((p) => setProjects(p.projects.map((x) => x.slug)))
+      .catch((e: unknown) => setErr(errText(e)))
+  }, [])
+
+  const load = useCallback(async (s: string) => {
+    setLoading(true)
+    setErr('')
+    setData(null)
+    try {
+      setData(await adminApi.graphExport(s))
+    } catch (e) {
+      setErr(errText(e))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    if (slug) {
+      url.searchParams.set('project', slug)
+    } else {
+      url.searchParams.delete('project')
+    }
+    window.history.replaceState(null, '', `/admin/graphs${url.search}`)
+    if (slug) void load(slug)
+    else setData(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug])
+
+  const permalink = `${window.location.origin}/admin/graphs${slug ? `?project=${encodeURIComponent(slug)}` : ''}`
+  const nodes = data?.nodes ?? []
+  const R = 220
+  const pos = new Map<string, { x: number; y: number }>()
+  nodes.forEach((n, i) => {
+    const a = (2 * Math.PI * i) / Math.max(nodes.length, 1)
+    pos.set(n.id, { x: 260 + R * Math.cos(a), y: 260 + R * Math.sin(a) })
+  })
+  const ids = new Set(nodes.map((n) => n.id))
+  const drawn = (data?.edges ?? []).filter((e) => ids.has(e.a) && ids.has(e.b)).slice(0, 300)
+
+  return (
+    <div>
+      <div className="ta-card">
+        <div className="ta-row">
+          <select className="ta-select" value={slug} onChange={(e) => setSlug(e.target.value)}>
+            <option value="">Общий граф (llmgraph_gigachat)</option>
+            {projects.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+          {slug && (
+            <button className="ta-btn secondary" onClick={() => void load(slug)} disabled={loading}>
+              Обновить
+            </button>
+          )}
+        </div>
+        {err && <p className="ta-error">{err}</p>}
+        <p className="ta-muted" style={{ marginBottom: 0 }}>
+          Отдельная ссылка на граф:{' '}
+          <a href={permalink} target="_blank" rel="noreferrer">
+            {permalink}
+          </a>
+          {data && (
+            <>
+              {' · '}
+              <a href={data.browser_url} target="_blank" rel="noreferrer">
+                Открыть в Neo4j Browser
+              </a>
+            </>
+          )}
+        </p>
+      </div>
+
+      {loading && (
+        <div className="ta-card">
+          <p className="ta-muted">Загрузка графа…</p>
+        </div>
+      )}
+
+      {data && (
+        <div className="ta-card">
+          <h3 style={{ margin: '0 0 8px' }}>
+            {data.source_model}: {nodes.length} узлов, {drawn.length} связей (показаны первые)
+          </h3>
+          {nodes.length > 0 ? (
+            <svg viewBox="0 0 520 520" style={{ width: '100%', maxWidth: 640 }}>
+              {drawn.map((e, i) => {
+                const p1 = pos.get(e.a)
+                const p2 = pos.get(e.b)
+                if (!p1 || !p2) return null
+                return <line key={i} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="#d1d5db" strokeWidth={1} />
+              })}
+              {nodes.map((n) => {
+                const p = pos.get(n.id)
+                if (!p) return null
+                return (
+                  <g key={n.id}>
+                    <circle cx={p.x} cy={p.y} r={9} fill={LABEL_COLORS[n.label] ?? '#6b7280'}>
+                      <title>
+                        {n.name} [{n.label}]
+                      </title>
+                    </circle>
+                    <text x={p.x + 12} y={p.y + 4} fontSize={10} fill="#374151">
+                      {(n.name || n.id).slice(0, 24)}
+                    </text>
+                  </g>
+                )
+              })}
+            </svg>
+          ) : (
+            <p className="ta-muted">В ветке пока пусто — запустите индексацию проекта.</p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}

@@ -162,4 +162,11 @@ export const adminApi = {
     req<{ ok: boolean; text: string }>(`/api/v1/admin/prompts/${encodeURIComponent(key)}/reset`, {
       method: 'POST',
     }),
+  graphExport: (project_slug: string) =>
+    req<{
+      source_model: string
+      browser_url: string
+      nodes: { id: string; label: string; name: string }[]
+      edges: { a: string; rel: string; b: string }[]
+    }>(`/api/v1/admin/graph/export?project_slug=${encodeURIComponent(project_slug)}`),
 }
