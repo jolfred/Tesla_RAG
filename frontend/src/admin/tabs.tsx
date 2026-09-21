@@ -1,21 +1,7 @@
 import type { JSX } from 'react'
 
 import type { AdminTab } from './adminTypes'
-import { ChatTab, DocsTab, GraphsTab, GroupsTab, PromptsTab, ProjectsTab } from './pages'
-
-// Заглушки шагов 2–7: каждый таб заменяется полноценной страницей
-// своим шагом, интерфейс AdminApp не меняется.
-function Stub({ text }: { text: string }): JSX.Element {
-  return (
-    <div className="ta-card">
-      <p className="ta-muted">{text}</p>
-    </div>
-  )
-}
-
-export function KeysTab(): JSX.Element {
-  return <Stub text="Шаг 7: API-ключи LLM и VK без рестарта." />
-}
+import { ChatTab, DocsTab, GraphsTab, GroupsTab, KeysTab, PromptsTab, ProjectsTab } from './pages'
 
 export function tabContent(tab: AdminTab): JSX.Element {
   switch (tab) {

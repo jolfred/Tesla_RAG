@@ -15,6 +15,8 @@ def db(tmp_path, monkeypatch):
     import backend.admin.db as dbmod
     import backend.admin.indexing as idxmod
     import backend.admin.jobs as jobsmod
+    import backend.admin.prompts as promptsmod
+    import backend.admin.settings as settingsmod
     import backend.api.routes.admin as admmod
 
     path = tmp_path / "admin.db"
@@ -27,7 +29,7 @@ def db(tmp_path, monkeypatch):
     def _init(_path: object = None) -> object:
         return orig_init(path)
 
-    for mod in (dbmod, idxmod, jobsmod, admmod):
+    for mod in (dbmod, idxmod, jobsmod, admmod, promptsmod, settingsmod):
         monkeypatch.setattr(mod, "get_connection", _conn, raising=False)
         monkeypatch.setattr(mod, "init_admin_db", _init, raising=False)
     monkeypatch.setattr(dbmod, "ADMIN_DB", path)
@@ -111,3 +113,44 @@ def test_load_doc_posts(tmp_path, monkeypatch):
     assert len(posts) == 1
     assert posts[0]["post_url"] == "doc://a1"
     assert posts[0]["published_at"]
+
+
+def test_settings_api(client):
+    body = client.get("/api/v1/admin/settings").json()["settings"]
+    keys = [s["key"] for s in body]
+    assert "GIGACHAT_AUTH_KEY" in keys and "VK_SERVICE_TOKEN" in keys
+    # значения наружу не утекают
+    assert all("value" not in s for s in body)
+    assert client.put("/api/v1/admin/settings/NOPE", json={"value": "x"}).status_code == 400
+    assert client.post("/api/v1/admin/settings/NOPE/check").status_code == 400
+    assert client.put(
+        "/api/v1/admin/settings/PROXYAPI_KEY", json={"value": "test-val"}
+    ).json() == {"ok": True}
+    flags = {s["key"]: s for s in client.get("/api/v1/admin/settings").json()["settings"]}
+    assert flags["PROXYAPI_KEY"]["in_db"] is True
+    # пустое значение = откат к env
+    client.put("/api/v1/admin/settings/PROXYAPI_KEY", json={"value": ""})
+    flags = {s["key"]: s for s in client.get("/api/v1/admin/settings").json()["settings"]}
+    assert flags["PROXYAPI_KEY"]["in_db"] is False
+
+
+def test_prompts_api(client):
+    body = client.get("/api/v1/admin/prompts").json()["prompts"]
+    assert [p["key"] for p in body] == [
+        "answer_base",
+        "answer_narrative",
+        "answer_global_extra",
+        "plan_prompt",
+        "extract_system",
+    ]
+    assert all(p["text"] for p in body)
+    assert client.put("/api/v1/admin/prompts/NOPE", json={"text": "x"}).status_code == 400
+    client.put("/api/v1/admin/prompts/answer_base", json={"text": "CUSTOM"})
+    custom = {
+        p["key"]: p
+        for p in client.get("/api/v1/admin/prompts").json()["prompts"]
+    }
+    assert custom["answer_base"]["custom"] is True
+    assert custom["answer_base"]["text"] == "CUSTOM"
+    r = client.post("/api/v1/admin/prompts/answer_base/reset").json()
+    assert r["ok"] is True and r["text"] != "CUSTOM"

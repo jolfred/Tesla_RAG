@@ -19,15 +19,19 @@ class VectorSearcher:
 
     def _get_qdrant(self) -> QdrantClient:
         if self._qdrant is None:
-            api_key = os.getenv("QDRANT_API_KEY") or QDRANT_API_KEY or None
-            self._qdrant = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, api_key=api_key)
+            from backend.admin.secrets import get_secret
+
+            api_key = get_secret("QDRANT_API_KEY", os.getenv("QDRANT_API_KEY") or QDRANT_API_KEY or "")
+            self._qdrant = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, api_key=api_key or None)
         return self._qdrant
 
     def _get_openai(self) -> OpenAI:
         if self._openai is None:
+            from backend.admin.secrets import get_secret
+
             self._openai = OpenAI(
-                base_url=os.getenv("PROXYAPI_BASE_URL", "https://openai.api.proxyapi.ru/v1"),
-                api_key=os.getenv("PROXYAPI_KEY", ""),
+                base_url=get_secret("PROXYAPI_BASE_URL", os.getenv("PROXYAPI_BASE_URL", "https://openai.api.proxyapi.ru/v1")),
+                api_key=get_secret("PROXYAPI_KEY", os.getenv("PROXYAPI_KEY", "")),
             )
         return self._openai
 

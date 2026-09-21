@@ -1021,3 +1021,127 @@ export function GraphsTab(): React.JSX.Element {
     </div>
   )
 }
+
+interface AdminSetting {
+  key: string
+  title: string
+  in_db: boolean
+  in_env: boolean
+}
+
+export function KeysTab(): React.JSX.Element {
+  const [settings, setSettings] = useState<AdminSetting[]>([])
+  const [values, setValues] = useState<Record<string, string>>({})
+  const [checks, setChecks] = useState<Record<string, { ok: boolean; info: string }>>({})
+  const [busy, setBusy] = useState('')
+  const [err, setErr] = useState('')
+  const [saved, setSaved] = useState('')
+
+  const reload = useCallback(async () => {
+    setErr('')
+    try {
+      setSettings((await adminApi.settings()).settings)
+    } catch (e) {
+      setErr(errText(e))
+    }
+  }, [])
+
+  useEffect(() => {
+    void reload()
+  }, [reload])
+
+  const save = async (key: string): Promise<void> => {
+    setBusy(key)
+    setErr('')
+    setSaved('')
+    try {
+      await adminApi.setSetting(key, values[key] ?? '')
+      setValues((v) => ({ ...v, [key]: '' }))
+      setSaved(`${key}: сохранено, применяется без рестарта.`)
+      await reload()
+    } catch (e) {
+      setErr(errText(e))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const check = async (key: string): Promise<void> => {
+    setBusy(key)
+    setErr('')
+    try {
+      const r = await adminApi.checkSetting(key)
+      setChecks((c) => ({ ...c, [key]: r }))
+    } catch (e) {
+      setErr(errText(e))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  return (
+    <div>
+      <div className="ta-card">
+        <p className="ta-muted" style={{ marginTop: 0 }}>
+          Значения хранятся в admin.db и перекрывают .env без рестарта: клиенты читают их при
+          каждом обращении, фоновые задачи получают через env. Значения никогда не показываются —
+          только факт наличия. Пустое поле + «Сохранить» = откат к .env.
+        </p>
+        {err && <p className="ta-error">{err}</p>}
+        {saved && <p style={{ color: '#067647', fontSize: 14 }}>{saved}</p>}
+        <table className="ta-table">
+          <thead>
+            <tr>
+              <th>Ключ</th>
+              <th>Статус</th>
+              <th>Новое значение</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {settings.map((s) => (
+              <tr key={s.key}>
+                <td>
+                  <code>{s.key}</code>
+                  <br />
+                  <span className="ta-muted">{s.title}</span>
+                </td>
+                <td>
+                  {s.in_db ? <span className="ta-pill">в БД ●</span> : null}
+                  {s.in_env ? <span className="ta-pill">в env</span> : null}
+                  {!s.in_db && !s.in_env ? <span className="ta-pill">не задан</span> : null}
+                  {checks[s.key] && (
+                    <div style={{ fontSize: 13, marginTop: 4 }}>
+                      {checks[s.key].ok ? '✅ ' : '❌ '}
+                      {checks[s.key].info}
+                    </div>
+                  )}
+                </td>
+                <td>
+                  <input
+                    className="ta-input"
+                    type="password"
+                    value={values[s.key] ?? ''}
+                    onChange={(e) => setValues((v) => ({ ...v, [s.key]: e.target.value }))}
+                    placeholder="****"
+                    style={{ width: 220 }}
+                  />
+                </td>
+                <td>
+                  <div className="ta-row">
+                    <button className="ta-btn secondary" onClick={() => void save(s.key)} disabled={busy === s.key}>
+                      Сохранить
+                    </button>
+                    <button className="ta-btn secondary" onClick={() => void check(s.key)} disabled={busy === s.key}>
+                      Проверить
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}

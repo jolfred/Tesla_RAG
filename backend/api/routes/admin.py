@@ -15,6 +15,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from backend.admin import jobs as _jobs
 from backend.admin import projects as _projects
 from backend.admin import prompts as _prompts
+from backend.admin import settings as _settings
 from backend.admin.db import get_connection, init_admin_db
 from backend.admin.groups import append_link, group_statuses
 from backend.admin.indexing import project_composition, project_stats
@@ -499,3 +500,30 @@ async def admin_graph_export(
         "nodes": [{"id": str(r["id"]), "label": r["label"], "name": r["name"]} for r in nrows],
         "edges": [{"a": str(r["a"]), "rel": r["rel"], "b": str(r["b"])} for r in erows],
     }
+
+
+# --- Ключи (шаг 7): без рестарта, значения наружу не отдаём ---
+
+
+@router.get("/api/v1/admin/settings")
+async def admin_settings(_: dict = Depends(verify_admin_session)) -> dict:
+    return {"settings": _settings.list_settings()}
+
+
+@router.put("/api/v1/admin/settings/{key}")
+async def admin_set_setting(
+    key: str, body: dict, _: dict = Depends(verify_admin_session)
+) -> dict:
+    try:
+        _settings.set_setting(key, body.get("value", ""))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@router.post("/api/v1/admin/settings/{key}/check")
+async def admin_check_setting(key: str, _: dict = Depends(verify_admin_session)) -> dict:
+    try:
+        return _settings.check_setting(key)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

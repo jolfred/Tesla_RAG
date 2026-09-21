@@ -73,7 +73,10 @@ class GigaChatClient:
         self.last_usage: dict | None = None
 
     def _fetch_token(self) -> str:
-        if not GIGACHAT_AUTH_KEY:
+        from backend.admin.secrets import get_secret
+
+        auth_key = get_secret("GIGACHAT_AUTH_KEY", GIGACHAT_AUTH_KEY)
+        if not auth_key:
             raise RuntimeError("GIGACHAT_AUTH_KEY is not set")
 
         rq_uid = str(uuid.uuid4())
@@ -84,7 +87,7 @@ class GigaChatClient:
                 "Content-Type": "application/x-www-form-urlencoded",
                 "Accept": "application/json",
                 "RqUID": rq_uid,
-                "Authorization": f"Basic {GIGACHAT_AUTH_KEY}",
+                "Authorization": f"Basic {auth_key}",
             },
             verify=False,
             timeout=60,

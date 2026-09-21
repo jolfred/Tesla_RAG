@@ -169,4 +169,17 @@ export const adminApi = {
       nodes: { id: string; label: string; name: string }[]
       edges: { a: string; rel: string; b: string }[]
     }>(`/api/v1/admin/graph/export?project_slug=${encodeURIComponent(project_slug)}`),
+  settings: () =>
+    req<{
+      settings: { key: string; title: string; in_db: boolean; in_env: boolean }[]
+    }>('/api/v1/admin/settings'),
+  setSetting: (key: string, value: string) =>
+    req<{ ok: boolean }>(`/api/v1/admin/settings/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ value }),
+    }),
+  checkSetting: (key: string) =>
+    req<{ ok: boolean; info: string }>(`/api/v1/admin/settings/${encodeURIComponent(key)}/check`, {
+      method: 'POST',
+    }),
 }

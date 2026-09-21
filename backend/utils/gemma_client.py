@@ -87,14 +87,17 @@ class GemmaClient:
         model: str | None = None,
         rpm: int | None = None,
     ):
-        if not GOOGLE_AI_STUDIO_KEY:
+        from backend.admin.secrets import get_secret
+
+        api_key = get_secret("GOOGLE_AI_STUDIO_KEY", GOOGLE_AI_STUDIO_KEY)
+        if not api_key:
             raise RuntimeError("GOOGLE_AI_STUDIO_KEY is not set")
         self._base_url = base_url
         self._model = model or GEMMA_MODEL
         self._limiter = RateLimiter(rpm if rpm else GEMMA_RPM)
         self._client = OpenAI(
             base_url=self._base_url,
-            api_key=GOOGLE_AI_STUDIO_KEY,
+            api_key=api_key,
             http_client=httpx.Client(),
         )
 
