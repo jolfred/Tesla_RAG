@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 
 import { adminApi } from './adminClient'
-import type { AdminDocument, AdminProjectDetail } from './adminClient'
+import type { AdminDocument, AdminGroup, AdminJob, AdminProjectDetail } from './adminClient'
 import { AdminApiError } from './adminClient'
 
 function errText(e: unknown): string {
@@ -309,6 +309,249 @@ export function ProjectsTab(): React.JSX.Element {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function fmtDate(ts: number): string {
+  if (!ts) return '—'
+  return new Date(ts * 1000).toLocaleString('ru-RU')
+}
+
+export function JobsBlock({ refreshKey }: { refreshKey: number }): React.JSX.Element {
+  const [jobs, setJobs] = useState<AdminJob[]>([])
+  const [openLog, setOpenLog] = useState<string | null>(null)
+  const [logText, setLogText] = useState('')
+  const [err, setErr] = useState('')
+
+  const reload = useCallback(async () => {
+    try {
+      setJobs((await adminApi.jobs()).jobs)
+    } catch (e) {
+      setErr(errText(e))
+    }
+  }, [])
+
+  useEffect(() => {
+    void reload()
+  }, [reload, refreshKey])
+
+  const showLog = async (id: string): Promise<void> => {
+    try {
+      const j = await adminApi.job(id)
+      setOpenLog(id)
+      setLogText(j.log_tail || '(лог пуст)')
+    } catch (e) {
+      setErr(errText(e))
+    }
+  }
+
+  return (
+    <div className="ta-card">
+      <div className="ta-row" style={{ justifyContent: 'space-between' }}>
+        <h3 style={{ margin: 0 }}>Задачи</h3>
+        <button className="ta-btn secondary" onClick={() => void reload()}>
+          Обновить
+        </button>
+      </div>
+      {err && <p className="ta-error">{err}</p>}
+      {jobs.length === 0 ? (
+        <p className="ta-muted">Задач пока нет.</p>
+      ) : (
+        <table className="ta-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Тип</th>
+              <th>Проект</th>
+              <th>Статус</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {jobs.map((j) => (
+              <tr key={j.id}>
+                <td>
+                  <code>{j.id}</code>
+                </td>
+                <td>{j.kind}</td>
+                <td>{j.project_slug || '—'}</td>
+                <td>
+                  {j.status}
+                  {j.error ? ` (${j.error})` : ''}
+                </td>
+                <td>
+                  <button className="ta-btn secondary" onClick={() => void showLog(j.id)}>
+                    Лог
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {openLog && (
+        <div>
+          <h4 style={{ marginBottom: 4 }}>Лог {openLog}</h4>
+          <pre className="ta-log">{logText}</pre>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function GroupsTab(): React.JSX.Element {
+  const [groups, setGroups] = useState<AdminGroup[]>([])
+  const [projects, setProjects] = useState<string[]>([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+  const [url, setUrl] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [jobsTick, setJobsTick] = useState(0)
+
+  const reload = useCallback(async () => {
+    setLoading(true)
+    setErr('')
+    try {
+      const [g, p] = await Promise.all([adminApi.groups(), adminApi.projects()])
+      setGroups(g.groups)
+      setProjects(p.projects.map((x) => x.slug))
+    } catch (e) {
+      setErr(errText(e))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void reload()
+  }, [reload])
+
+  const add = async (): Promise<void> => {
+    setBusy(true)
+    setErr('')
+    try {
+      await adminApi.addGroup(url)
+      setUrl('')
+      await reload()
+    } catch (e) {
+      setErr(errText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const scrape = async (domain: string, meta_only: boolean): Promise<void> => {
+    setErr('')
+    try {
+      await adminApi.scrapeGroup(domain, meta_only)
+      setJobsTick((n) => n + 1)
+    } catch (e) {
+      setErr(errText(e))
+    }
+  }
+
+  const attach = async (domain: string, slug: string): Promise<void> => {
+    if (!slug) return
+    setErr('')
+    try {
+      await adminApi.attachItem(slug, 'vk_group', domain)
+      await reload()
+    } catch (e) {
+      setErr(errText(e))
+    }
+  }
+
+  return (
+    <div>
+      <div className="ta-card">
+        <h3 style={{ margin: '0 0 8px' }}>Добавить группу</h3>
+        <div className="ta-row">
+          <input
+            className="ta-input"
+            style={{ minWidth: 280 }}
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://vk.ru/…"
+          />
+          <button className="ta-btn" onClick={() => void add()} disabled={busy || !url}>
+            Добавить
+          </button>
+        </div>
+        {err && <p className="ta-error">{err}</p>}
+      </div>
+
+      <div className="ta-card">
+        <h3 style={{ margin: '0 0 8px' }}>Группы ({groups.length})</h3>
+        {loading ? (
+          <p className="ta-muted">Загрузка…</p>
+        ) : (
+          <table className="ta-table">
+            <thead>
+              <tr>
+                <th>Группа</th>
+                <th>Постов</th>
+                <th>Мета</th>
+                <th>Проекты</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map((g) => (
+                <tr key={g.domain} style={g.enabled ? undefined : { opacity: 0.55 }}>
+                  <td>
+                    <a href={g.url} target="_blank" rel="noreferrer">
+                      {g.domain}
+                    </a>
+                    {!g.enabled && <span className="ta-muted"> (выкл. в txt)</span>}
+                  </td>
+                  <td>
+                    {g.posts_count > 0 ? `${g.posts_count} · ${fmtDate(g.posts_mtime)}` : '—'}
+                  </td>
+                  <td>{g.meta_name || '—'}</td>
+                  <td>
+                    {g.projects.map((s) => (
+                      <span key={s} className="ta-pill">
+                        {s}
+                      </span>
+                    ))}
+                    <select
+                      className="ta-select"
+                      defaultValue=""
+                      onChange={(e) => {
+                        void attach(g.domain, e.target.value)
+                        e.target.value = ''
+                      }}
+                      title="Добавить в проект"
+                    >
+                      <option value="">+ в проект…</option>
+                      {projects
+                        .filter((s) => !g.projects.includes(s))
+                        .map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                    </select>
+                  </td>
+                  <td>
+                    <div className="ta-row">
+                      <button className="ta-btn secondary" onClick={() => void scrape(g.domain, false)}>
+                        Спарсить
+                      </button>
+                      <button className="ta-btn secondary" onClick={() => void scrape(g.domain, true)}>
+                        Мета
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <JobsBlock refreshKey={jobsTick} />
     </div>
   )
 }

@@ -10,10 +10,12 @@ import json
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 
+from backend.admin import jobs as _jobs
 from backend.admin import projects as _projects
 from backend.admin.db import get_connection, init_admin_db
+from backend.admin.groups import append_link, group_statuses
 from backend.api.auth import verify_admin_session
 from backend.config import DOCUMENTS_DIR
 from backend.utils.logger import setup_logger
@@ -209,3 +211,68 @@ async def admin_upload_document(
         conn.close()
     logger.info("Admin uploaded %s (%d bytes)", save_path.name, len(content))
     return {"doc_id": doc_id, "title": doc_title, "status": "uploaded"}
+
+
+# --- VK-группы и задачи (шаг 2) ---
+
+
+@router.get("/api/v1/admin/groups")
+async def admin_groups(_: dict = Depends(verify_admin_session)) -> dict:
+    init_admin_db()
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT item_id, project_slug FROM project_items WHERE item_type = 'vk_group'"
+        ).fetchall()
+        by_group: dict[str, list[str]] = {}
+        for r in rows:
+            by_group.setdefault(r["item_id"], []).append(r["project_slug"])
+    finally:
+        conn.close()
+    groups = []
+    for g in group_statuses():
+        groups.append({**g, "projects": sorted(by_group.get(g["domain"], []))})
+    return {"groups": groups}
+
+
+@router.post("/api/v1/admin/groups", status_code=201)
+async def admin_add_group(body: dict, _: dict = Depends(verify_admin_session)) -> dict:
+    try:
+        return append_link(body.get("url", ""))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/api/v1/admin/groups/{domain}/scrape", status_code=202)
+async def admin_scrape_group(
+    domain: str,
+    body: dict,
+    bg: BackgroundTasks,
+    _: dict = Depends(verify_admin_session),
+) -> dict:
+    urls = {g["domain"]: g["url"] for g in group_statuses()}
+    if domain not in urls:
+        raise HTTPException(status_code=404, detail="group not in group_links.txt")
+    limit = int(body.get("limit") or 0)
+    meta_only = bool(body.get("meta_only"))
+    job = _jobs.create_job("scrape_meta" if meta_only else "scrape")
+    argv = _jobs.python_module_cmd("scraper.main", "--url", urls[domain])
+    if meta_only:
+        argv.append("--meta")
+    elif limit > 0:
+        argv += ["--limit", str(limit)]
+    bg.add_task(_jobs.run_command_job, job["id"], argv)
+    return {"job_id": job["id"], "status": "queued"}
+
+
+@router.get("/api/v1/admin/jobs")
+async def admin_jobs(_: dict = Depends(verify_admin_session)) -> dict:
+    return {"jobs": _jobs.list_jobs()}
+
+
+@router.get("/api/v1/admin/jobs/{job_id}")
+async def admin_job(job_id: str, _: dict = Depends(verify_admin_session)) -> dict:
+    job = _jobs.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    return job

@@ -47,6 +47,28 @@ export interface AdminProjectDetail {
   items: { item_type: string; item_id: string }[]
 }
 
+export interface AdminGroup {
+  url: string
+  domain: string
+  enabled: boolean
+  posts_count: number
+  posts_mtime: number
+  meta_name: string
+  projects: string[]
+}
+
+export interface AdminJob {
+  id: string
+  kind: string
+  project_slug: string
+  status: string
+  log_path: string
+  error: string
+  created_at: string
+  finished_at: string
+  log_tail?: string
+}
+
 export const adminApi = {
   status: () => req<{ status: string; projects_count: number; jobs_active: number }>('/api/v1/admin/status'),
   projects: () =>
@@ -93,4 +115,14 @@ export const adminApi = {
     }
     return (await resp.json()) as { doc_id: string; title: string }
   },
+  groups: () => req<{ groups: AdminGroup[] }>('/api/v1/admin/groups'),
+  addGroup: (url: string) =>
+    req<AdminGroup>('/api/v1/admin/groups', { method: 'POST', body: JSON.stringify({ url }) }),
+  scrapeGroup: (domain: string, meta_only: boolean) =>
+    req<{ job_id: string; status: string }>(`/api/v1/admin/groups/${encodeURIComponent(domain)}/scrape`, {
+      method: 'POST',
+      body: JSON.stringify({ meta_only }),
+    }),
+  jobs: () => req<{ jobs: AdminJob[] }>('/api/v1/admin/jobs'),
+  job: (id: string) => req<AdminJob>(`/api/v1/admin/jobs/${encodeURIComponent(id)}`),
 }

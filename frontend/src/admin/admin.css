@@ -170,6 +170,17 @@
   margin: 0 4px 4px 0;
 }
 
+.ta-log {
+  background: #111318;
+  color: #d7dce2;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 12px;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
 @media (max-width: 760px) {
   .ta-shell {
     flex-direction: column;
