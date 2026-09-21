@@ -26,13 +26,14 @@ logger = setup_logger("entity_search")
 
 
 def search_entity_detail(searcher, question, plan, top_k, include_context,
-                         plan_sink, year_period, root) -> dict:
+                         plan_sink, year_period, root,
+                         source_model=None, collection="posts") -> dict:
     """Фаза 5: entity_detail — структурный блок ролей + LLM-абзац раздельно."""
     answer_sink: list = []
     graph = searcher._get_planner()._get_graph()
     rows: list = []
     if graph is not None:
-        candidate = person_roles_query(plan.target_name or "")
+        candidate = person_roles_query(plan.target_name or "", source_model)
         if candidate is not None:
             query, params = candidate
             try:
@@ -50,14 +51,14 @@ def search_entity_detail(searcher, question, plan, top_k, include_context,
         pass
     structured = render_person_roles(
         supersede_roles(rows_to_facts(rows)), plan.target_name or "?")
-    source_posts = searcher._resolve_source_posts(rows) if rows else []
+    source_posts = searcher._resolve_source_posts(rows, collection=collection) if rows else []
     try:
         with _lf.observation(
             "vector_search", as_type="retriever",
             input={"question": question, "top_k": 5,
                    "reason": "entity_detail"},
         ) as sp:
-            posts = searcher._get_vec().search(question, top_k=5)
+            posts = searcher._get_vec().search(question, top_k=5, collection=collection)
             sp.update(output={
                 "posts_count": len(posts),
                 "urls": [p.get("post_url") for p in posts[:10]],

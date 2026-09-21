@@ -95,7 +95,9 @@ HQ_GENERIC_WORDS = frozenset(
 )
 
 
-def resolve_org_norm_id(org_filter: str | None, graph) -> str | None:
+def resolve_org_norm_id(
+    org_filter: str | None, graph, source_model: str | None = None
+) -> str | None:
     """Честная резолюция организации: norm_id существующего узла или None.
 
     graph — объект с .search_cypher(query, params) (GraphBuilder или mock
@@ -107,6 +109,7 @@ def resolve_org_norm_id(org_filter: str | None, graph) -> str | None:
     norm = normalize_id(org_filter)
     if not norm:
         return None
+    model = source_model or "llmgraph_gigachat"
     try:
         rows = graph.search_cypher(
             "MATCH (o) "
@@ -116,7 +119,7 @@ def resolve_org_norm_id(org_filter: str | None, graph) -> str | None:
             "OR toLower(toString(o.name)) CONTAINS toLower($raw)) "
             "RETURN o.norm_id AS norm_id, o.name AS name, "
             "o.org_type AS org_type LIMIT 25",
-            {"m": "llmgraph_gigachat", "norm": norm, "raw": org_filter},
+            {"m": model, "norm": norm, "raw": org_filter},
         )
     except Exception as e:
         logger.warning("org resolve failed: %s", e)
@@ -148,6 +151,7 @@ def classify_and_plan(
     graph=None,
     llm: GigaChatClient | None = None,
     trace_sink: list | None = None,
+    source_model: str | None = None,
 ) -> QueryPlan:
     """Один LLM-вызов: интент + слоты, дальше — детерминированный код."""
     client = llm or GigaChatClient()
@@ -183,7 +187,9 @@ def classify_and_plan(
     kind = INTENT_TO_KIND[intent]
 
     org_filter = getattr(slots, "org_filter", None)
-    org_norm_id = resolve_org_norm_id(org_filter, graph) if org_filter else None
+    org_norm_id = (
+        resolve_org_norm_id(org_filter, graph, source_model) if org_filter else None
+    )
     if org_filter and org_norm_id is None:
         logger.warning("org resolve failed for filter: %s", org_filter)
 

@@ -139,4 +139,14 @@ export const adminApi = {
     }),
   jobs: () => req<{ jobs: AdminJob[] }>('/api/v1/admin/jobs'),
   job: (id: string) => req<AdminJob>(`/api/v1/admin/jobs/${encodeURIComponent(id)}`),
+  adminChat: (question: string, project_slug: string) =>
+    req<{
+      answer: string
+      sources: { title: string; url: string }[]
+      mode: string
+      facts_count: number
+      posts_used: number
+      calls: { title: string; text: string }[] | null
+      trace_id: string | null
+    }>('/api/v1/admin/chat', { method: 'POST', body: JSON.stringify({ question, project_slug }) }),
 }

@@ -629,3 +629,109 @@ export function GroupsTab(): React.JSX.Element {
     </div>
   )
 }
+
+interface ChatResult {
+  answer: string
+  sources: { title: string; url: string }[]
+  mode: string
+  facts_count: number
+  posts_used: number
+  calls: { title: string; text: string }[] | null
+  trace_id: string | null
+}
+
+export function ChatTab(): React.JSX.Element {
+  const [projects, setProjects] = useState<string[]>([])
+  const [slug, setSlug] = useState('')
+  const [question, setQuestion] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [res, setRes] = useState<ChatResult | null>(null)
+
+  useEffect(() => {
+    adminApi
+      .projects()
+      .then((p) => setProjects(p.projects.map((x) => x.slug)))
+      .catch((e: unknown) => setErr(errText(e)))
+  }, [])
+
+  const ask = async (): Promise<void> => {
+    if (!question.trim()) return
+    setBusy(true)
+    setErr('')
+    setRes(null)
+    try {
+      setRes(await adminApi.adminChat(question.trim(), slug))
+    } catch (e) {
+      setErr(errText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div>
+      <div className="ta-card">
+        <div className="ta-row">
+          <select className="ta-select" value={slug} onChange={(e) => setSlug(e.target.value)}>
+            <option value="">Общий граф (без проекта)</option>
+            {projects.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+          <input
+            className="ta-input"
+            style={{ flex: 1, minWidth: 240 }}
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            placeholder="Вопрос для проверки…"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void ask()
+            }}
+          />
+          <button className="ta-btn" onClick={() => void ask()} disabled={busy || !question.trim()}>
+            Спросить
+          </button>
+        </div>
+        {err && <p className="ta-error">{err}</p>}
+      </div>
+
+      {busy && (
+        <div className="ta-card">
+          <p className="ta-muted">Думаю… (идёт через GigaChat, до ~2 минут)</p>
+        </div>
+      )}
+
+      {res && (
+        <div>
+          <div className="ta-card">
+            <p className="ta-muted" style={{ marginTop: 0 }}>
+              mode: {res.mode} · фактов: {res.facts_count} · постов: {res.posts_used}
+              {res.trace_id ? ` · trace: ${res.trace_id}` : ''}
+            </p>
+            <p style={{ whiteSpace: 'pre-wrap' }}>{res.answer}</p>
+            {res.sources.length > 0 && (
+              <ul>
+                {res.sources.map((s, i) => (
+                  <li key={i}>
+                    <a href={s.url} target="_blank" rel="noreferrer">
+                      {s.title}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          {res.calls?.map((c, i) => (
+            <details key={i} className="ta-card">
+              <summary style={{ cursor: 'pointer', fontWeight: 600 }}>{c.title}</summary>
+              <pre className="ta-log">{c.text}</pre>
+            </details>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}

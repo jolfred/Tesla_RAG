@@ -58,7 +58,17 @@ class GraphRAGSearcher:
             self._answer_gen = AnswerGenerator()
         return self._answer_gen
 
-    def _load_communities(self) -> list[dict]:
+    def _load_communities(self, project_slug: str | None = None) -> list[dict]:
+        if project_slug:
+            path = COMMUNITIES_PATH.with_name(f"communities_proj_{project_slug}.json")
+            if not path.exists():
+                return []
+            try:
+                with open(path, encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.warning("Failed to load communities: %s", e)
+                return []
         if self._communities is None:
             if COMMUNITIES_PATH.exists():
                 try:
@@ -132,7 +142,7 @@ class GraphRAGSearcher:
         return cards
 
     def _resolve_source_posts(
-        self, graph_facts: list[dict], cap: int = 8
+        self, graph_facts: list[dict], cap: int = 8, collection: str = "posts"
     ) -> list[dict]:
         """Полные тексты постов-источников фактов (п.11, главная проблема).
 
@@ -158,7 +168,7 @@ class GraphRAGSearcher:
             qclient = self._get_vec()._get_qdrant()
             ids = [str(uuid.uuid5(uuid.NAMESPACE_URL, u)) for u in urls]
             points = qclient.retrieve(
-                collection_name="posts",
+                collection_name=collection,
                 ids=ids,
                 with_payload=True,
                 with_vectors=False,
@@ -333,7 +343,13 @@ class GraphRAGSearcher:
             _lf.score(_lf.current_trace_id(), rub[0], rub[1],
                       data_type="NUMERIC")
 
-    def search(self, question: str, top_k: int = 8, include_context: bool = False) -> dict:
+    def search(
+        self,
+        question: str,
+        top_k: int = 8,
+        include_context: bool = False,
+        project_slug: str | None = None,
+    ) -> dict:
         """Единый путь: classify+plan, диспетчер enumerable/narrative.
 
         enumerable + факты -> шаблон (0 LLM-вызовов на ответе);
@@ -343,20 +359,34 @@ class GraphRAGSearcher:
         """
         with _lf.observation("answer", input=question) as root:
             try:
-                return self._search_inner(question, top_k, include_context, root)
+                return self._search_inner(question, top_k, include_context, root, project_slug)
             finally:
                 _lf.flush()
 
-    def _search_inner(self, question, top_k, include_context, root) -> dict:
+    def _search_inner(self, question, top_k, include_context, root, project_slug=None) -> dict:
         logger.info("GraphRAG search: '%s'", question)
         plan_sink: list = []
         answer_sink: list = []
 
+        if project_slug:
+            from backend.admin.indexing import project_collection, project_source_model
+
+            source_model: str | None = project_source_model(project_slug)
+            collection = project_collection(project_slug)
+        else:
+            source_model = None
+            collection = "posts"
+
         with _lf.observation("classify_and_plan", input=question) as sp:
+            # source_model — только для проекта: дефолтный путь зовёт
+            # classify_and_plan ровно как раньше (совместимость с моками).
+            plan_kwargs: dict = {"trace_sink": plan_sink}
+            if source_model:
+                plan_kwargs["source_model"] = source_model
             plan = query_planner.classify_and_plan(
                 question,
                 graph=self._get_planner()._get_graph(),
-                trace_sink=plan_sink,
+                **plan_kwargs,
             )
             sp.update(output=plan.to_dict())
         mode = plan.mode
@@ -375,16 +405,19 @@ class GraphRAGSearcher:
         if plan.intent == "entity_detail" and plan.target_name:
             return search_entity_detail(
                 self, question, plan, top_k, include_context, plan_sink,
-                year_period, root)
+                year_period, root, source_model, collection)
 
+        plan_dict = plan.to_dict()
+        if source_model:
+            plan_dict["source_model"] = source_model
         if mode in ("struct", "local"):
             try:
                 with _lf.observation(
                     "cypher_exec", as_type="retriever",
-                    input=plan.to_dict(),
+                    input=plan_dict,
                 ) as sp:
                     graph_facts, plan_debug = self._get_planner().execute_v2(
-                        plan.to_dict()
+                        plan_dict
                     )
                     sp.update(output={
                         "facts_count": len(graph_facts),
@@ -397,7 +430,7 @@ class GraphRAGSearcher:
             except Exception:
                 pass
             if graph_facts:
-                source_posts = self._resolve_source_posts(graph_facts)
+                source_posts = self._resolve_source_posts(graph_facts, collection=collection)
                 try:
                     cards = self._cards_for_fact_sources(graph_facts)
                     seen = {p.get("post_url") for p in posts}
@@ -411,7 +444,7 @@ class GraphRAGSearcher:
                         input={"question": question, "top_k": 5,
                                "reason": "struct_fallback"},
                     ) as sp:
-                        posts = self._get_vec().search(question, top_k=5)
+                        posts = self._get_vec().search(question, top_k=5, collection=collection)
                         sp.update(output={
                             "posts_count": len(posts),
                             "urls": [p.get("post_url") for p in posts[:10]],
@@ -434,14 +467,14 @@ class GraphRAGSearcher:
                     except Exception as e:
                         logger.warning("Group card injection failed: %s", e)
         elif mode == "global":
-            communities = self._load_communities()
+            communities = self._load_communities(project_slug)
         else:  # basic
             try:
                 with _lf.observation(
                     "vector_search", as_type="retriever",
                     input={"question": question, "top_k": top_k},
                 ) as sp:
-                    posts = self._get_vec().search(question, top_k=top_k)
+                    posts = self._get_vec().search(question, top_k=top_k, collection=collection)
                     sp.update(output={
                         "posts_count": len(posts),
                         "urls": [p.get("post_url") for p in posts[:10]],

@@ -74,6 +74,31 @@ def test_namespace_names():
     assert project_collection("shtab") == "posts_proj_shtab"
 
 
+def test_project_branch_override():
+    """Ветка проекта пробрасывается в Cypher-параметры, дефолт не меняется."""
+    from backend.rag.planner_common import MODEL
+    from backend.rag.planner_queries import person_roles_query, query_for_plan_v2
+
+    plan = {
+        "intent": "commanders",
+        "org_filter": "Штаб",
+        "org_norm_id": "штаб со кгэу тесла",
+        "limit": 20,
+        "source_model": "proj_shtab",
+    }
+    _, params = query_for_plan_v2(plan)
+    assert params["model"] == "proj_shtab"
+
+    plan2 = {k: v for k, v in plan.items() if k != "source_model"}
+    _, params2 = query_for_plan_v2(plan2)
+    assert params2["model"] == MODEL
+
+    _, prm = person_roles_query("Астафьев", "proj_shtab")
+    assert prm["model"] == "proj_shtab"
+    _, prm2 = person_roles_query("Астафьев")
+    assert prm2["model"] == MODEL
+
+
 def test_load_doc_posts(tmp_path, monkeypatch):
     import backend.admin.indexing as idxmod
 

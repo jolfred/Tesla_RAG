@@ -36,16 +36,17 @@ class VectorSearcher:
         resp = client.embeddings.create(model=EMBEDDING_MODEL, input=text)
         return resp.data[0].embedding
 
-    def search(self, query: str, top_k: int = 10) -> list[dict]:
+    def search(self, query: str, top_k: int = 10, collection: str | None = None) -> list[dict]:
         qclient = self._get_qdrant()
+        coll = collection or POSTS_COLLECTION
         collections = [c.name for c in qclient.get_collections().collections]
-        if POSTS_COLLECTION not in collections:
-            logger.warning("Qdrant collection '%s' not found", POSTS_COLLECTION)
+        if coll not in collections:
+            logger.warning("Qdrant collection '%s' not found", coll)
             return []
 
         vector = self._embed(query)
         result = qclient.query_points(
-            collection_name=POSTS_COLLECTION,
+            collection_name=coll,
             query=vector,
             limit=top_k,
         )

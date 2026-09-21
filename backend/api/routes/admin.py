@@ -338,3 +338,51 @@ async def admin_project_stats(slug: str, _: dict = Depends(verify_admin_session)
     if not exists:
         raise HTTPException(status_code=404, detail="project not found")
     return project_stats(slug)
+
+
+# --- Тест чата по проекту (шаг 4): всегда с контекстом ---
+
+_searcher = None
+
+
+def _get_searcher():
+    global _searcher
+    if _searcher is None:
+        from backend.rag.searcher import GraphRAGSearcher
+
+        _searcher = GraphRAGSearcher()
+    return _searcher
+
+
+@router.post("/api/v1/admin/chat")
+async def admin_chat(body: dict, _: dict = Depends(verify_admin_session)) -> dict:
+    question = (body.get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="пустой вопрос")
+    slug = (body.get("project_slug") or "").strip() or None
+    if slug:
+        init_admin_db()
+        conn = get_connection()
+        try:
+            exists = (
+                conn.execute("SELECT 1 FROM projects WHERE slug = ?", (slug,)).fetchone()
+                is not None
+            )
+        finally:
+            conn.close()
+        if not exists:
+            raise HTTPException(status_code=404, detail="project not found")
+    try:
+        result = _get_searcher().search(question, include_context=True, project_slug=slug)
+    except Exception as e:
+        logger.error("Admin chat failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error")
+    return {
+        "answer": result["answer"],
+        "sources": result["sources"],
+        "mode": result.get("mode", "basic"),
+        "facts_count": result.get("facts_count", 0),
+        "posts_used": result.get("posts_used", 0),
+        "calls": result.get("calls"),
+        "trace_id": result.get("trace_id"),
+    }

@@ -45,7 +45,7 @@ def commanders_query_strict(plan: dict) -> Optional[tuple[str, dict]]:
         ORDER BY p.name
         LIMIT $limit
         """,
-        {"model": MODEL, "org_norm_id": org_norm_id, "limit": _limit(plan)},
+        {"model": plan.get("source_model") or MODEL, "org_norm_id": org_norm_id, "limit": _limit(plan)},
     )
 
 
@@ -64,7 +64,7 @@ def units_query_strict(plan: dict) -> Optional[tuple[str, dict]]:
         ORDER BY u.name
         LIMIT $limit
         """,
-        {"model": MODEL, "org_norm_id": org_norm_id, "limit": _limit(plan)},
+        {"model": plan.get("source_model") or MODEL, "org_norm_id": org_norm_id, "limit": _limit(plan)},
     )
 
 
@@ -114,11 +114,11 @@ def partners_query_strict(plan: dict) -> Optional[tuple[str, dict]]:
         ORDER BY o.name
         LIMIT $limit
         """,
-        {"model": MODEL, "org_norm_id": org_norm_id, "limit": _limit(plan)},
+        {"model": plan.get("source_model") or MODEL, "org_norm_id": org_norm_id, "limit": _limit(plan)},
     )
 
 
-def person_roles_query(target_name: str) -> Optional[tuple[str, dict]]:
+def person_roles_query(target_name: str, source_model: str | None = None) -> Optional[tuple[str, dict]]:
     """Роли конкретной персоны (Фаза 5, read-only lookup).
 
     CONTAINS здесь допустим: ищется явно названная сущность, а не
@@ -139,5 +139,5 @@ def person_roles_query(target_name: str) -> Optional[tuple[str, dict]]:
         ORDER BY o.name
         LIMIT 50
         """,
-        {"model": MODEL, "name": target_name},
+        {"model": source_model or MODEL, "name": target_name},
     )

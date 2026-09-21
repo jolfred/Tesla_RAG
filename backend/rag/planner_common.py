@@ -32,7 +32,7 @@ def _exact_first(alias: str = "o") -> str:
 
 def _params(plan: dict, **extra) -> dict:
     p = {
-        "model": MODEL,
+        "model": plan.get("source_model") or MODEL,
         "org": plan.get("org_filter"),
         "org_exact": plan.get("org_exact"),
         "limit": _limit(plan),
