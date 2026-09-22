@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 
 import { api } from '../api/client'
 import type { ChatResponse } from '../types'
+import { Markdown } from '../wiki/markdown'
 import { PRESET_QUESTIONS } from './data'
 
 interface AnswerState {
@@ -18,49 +19,6 @@ const MODE_LABELS: Record<string, string> = {
   global: 'Глобальный',
   basic: 'Базовый',
   wiki: 'По Летописи',
-}
-
-/** Короткая подпись гиперссылки: vk.com › wall-9174… */
-function shortLabel(url: string): string {
-  try {
-    const u = new URL(url)
-    const host = u.hostname.replace(/^www\./, '').replace(/^m\./, '')
-    const path = (u.pathname + u.search).replace(/\/$/, '')
-    const cut = path.length > 26 ? `${path.slice(0, 26)}…` : path
-    return `${host}${cut ? ` › ${cut.replace(/^\//, '')}` : ''}`
-  } catch {
-    return url.length > 34 ? `${url.slice(0, 34)}…` : url
-  }
-}
-
-/** Текст ответа со ссылками-гиперссылками вместо голых URL; понимает и markdown [текст](url). */
-function Linkified({ text }: { text: string }): React.JSX.Element {
-  const parts: React.ReactNode[] = []
-  const re = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|(https?:\/\/[^\s<>"'\]]+)/g
-  let last = 0
-  let m: RegExpExecArray | null
-  let i = 0
-  while ((m = re.exec(text)) !== null) {
-    const mdLabel = m[1]
-    let url = m[2] ?? m[3]
-    // Отрезаем прилипшую пунктуацию и скобки: "…9511]." -> "…9511" (только для голых URL)
-    const tail = !m[2] ? url.match(/[.,!?;:)\]}'"]+$/) : null
-    let suffix = ''
-    if (tail) {
-      suffix = tail[0]
-      url = url.slice(0, -suffix.length)
-    }
-    if (m.index > last) parts.push(text.slice(last, m.index))
-    parts.push(
-      <a key={i++} href={url} target="_blank" rel="noreferrer" style={{ color: '#B79CFF' }}>
-        {mdLabel ?? shortLabel(url)}
-      </a>,
-    )
-    if (suffix) parts.push(suffix)
-    last = m.index + m[0].length
-  }
-  if (last < text.length) parts.push(text.slice(last))
-  return <>{parts}</>
 }
 
 /** Карусель превью постов: переключение стрелками, счётчик. */
@@ -237,8 +195,8 @@ function AnswerCard({ state }: { state: AnswerState }): React.JSX.Element | null
             <div style={{ fontSize: 12, color: '#9D65FF', fontWeight: 700, marginBottom: 6, letterSpacing: '0.04em' }}>
               ВЫДЕРЖКА ИЗ БАЗЫ ШТАБА
             </div>
-            <div style={{ fontSize: 15, lineHeight: 1.65, color: '#F2EFFF', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-              <Linkified text={d.answer} />
+            <div style={{ textAlign: 'left' }}>
+              <Markdown text={d.answer} tone="dark" />
             </div>
           </div>
           {(d.previews ?? []).length > 0 && (
