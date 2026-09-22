@@ -13,7 +13,10 @@ const PAGES = {
 const ARTICLE = {
   status: 'success',
   slug: 'lso/spo_yunost',
-  markdown: '# СПО «Юность»\n\nКомандир — [[persons/bogachev_egor|Богачёв Егор]].\n',
+  markdown:
+    '# СПО «Юность»\n\nКомандир — [[persons/bogachev_egor|Богачёв Егор]] ' +
+    '(Источник: ([wall-198864697_133](https://vk.com/spoyunost2020?w=wall-198864697_133)), опубл. 2021-04-07).\n' +
+    '\n## Источники данных\n\n- `../posts/posts_spoyunost2020.jsonl`\n',
   links: ['persons/bogachev_egor'],
   sources: ['https://vk.com/spoyunost2020?w=wall-198864697_133'],
 }
@@ -52,5 +55,24 @@ describe('WikiSection', () => {
     fireEvent.click(within(catalog()).getByText('СПО «Юность»').closest('button')!)
     await waitFor(() => expect(screen.getByText(/Командир/i)).toBeTruthy())
     expect(screen.getAllByText('Богачёв Егор').some((el) => el.tagName === 'BUTTON')).toBe(true)
+    // wall-ID показан как «пост VK», служебный раздел скрыт
+    const vkLinks = screen.getAllByText('пост VK')
+    expect(vkLinks.length).toBeGreaterThanOrEqual(1)
+    expect(vkLinks.every((el) => el.tagName === 'A')).toBe(true)
+    expect(screen.queryByText(/wall-198864697_133/)).toBeNull()
+    expect(screen.queryByText(/Источники данных/)).toBeNull()
+    expect(screen.queryByText(/posts_spoyunost2020/)).toBeNull()
+    // URL статьи — отдельная страница
+    expect(window.location.pathname).toBe('/wiki/lso/spo_yunost')
+  })
+
+  it('глубокая ссылка /wiki/<slug> открывает статью сразу', async () => {
+    window.history.pushState({}, '', '/wiki/lso/spo_yunost')
+    try {
+      render(<WikiSection />)
+      await waitFor(() => expect(screen.getByText(/Командир/i)).toBeTruthy())
+    } finally {
+      window.history.pushState({}, '', '/')
+    }
   })
 })

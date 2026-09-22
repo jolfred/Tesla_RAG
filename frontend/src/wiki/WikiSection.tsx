@@ -5,6 +5,13 @@ import type { WikiNode, WikiPageData } from '../types'
 import { categoryOf, parseWikiLinks } from './wikilinks'
 
 const INLINE_RE = /(\*\*[^*]+\*\*|\[\[[^\]]+\]\]|\[[^\]]+\]\(https?:\/\/[^)\s]+\)|https?:\/\/[^\s<>"'\]]+)/g
+const WALL_RE = /wall-?\d+_\d+/
+
+/** wall-ID («wall-198864697_133», в т.ч. внутри ?w=wall-…) читателю не нужен — показываем «пост VK». */
+function vkLabel(label: string, url: string): string {
+  if (WALL_RE.test(label) || WALL_RE.test(url)) return 'пост VK'
+  return label.length > 40 ? `${label.slice(0, 40)}…` : label
+}
 
 /** Инлайн-разметка: жирный, [[вики-ссылки]], [текст](url), голые URL. */
 function Inline({ text, onWikiLink }: { text: string; onWikiLink: (slug: string) => void }): React.JSX.Element {
@@ -41,7 +48,8 @@ function Inline({ text, onWikiLink }: { text: string; onWikiLink: (slug: string)
     } else {
       const md = /^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/.exec(tok)
       const url = md ? md[2] : tok
-      const label = md ? md[1] : tok.length > 40 ? `${tok.slice(0, 40)}…` : tok
+      const rawLabel = md ? md[1] : tok.length > 40 ? `${tok.slice(0, 40)}…` : tok
+      const label = vkLabel(rawLabel, url)
       out.push(
         <a key={i++} href={url} target="_blank" rel="noreferrer" style={{ color: '#B79CFF' }}>
           {label}
@@ -54,10 +62,17 @@ function Inline({ text, onWikiLink }: { text: string; onWikiLink: (slug: string)
   return <>{out}</>
 }
 
-/** Минимум markdown: заголовки, списки, таблицы, параграфы + frontmatter вырезан. */
+/** Минимум markdown: заголовки, списки, таблицы, параграфы.
+ * Frontmatter и служебный раздел «Источники данных» (локальные пути) вырезаны. */
 function Article({ markdown, onWikiLink }: { markdown: string; onWikiLink: (slug: string) => void }): React.JSX.Element {
   const body = markdown.replace(/^---\n[\s\S]*?\n---\n/, '')
-  const lines = body.split('\n')
+  const lines: string[] = []
+  let skip = false
+  for (const line of body.split('\n')) {
+    const h = /^(#{1,3})\s+(.*)$/.exec(line)
+    if (h) skip = h[2].trim().toLowerCase() === 'источники данных'
+    if (!skip) lines.push(line)
+  }
   const blocks: React.ReactNode[] = []
   let i = 0
   let k = 0
@@ -149,15 +164,24 @@ function Article({ markdown, onWikiLink }: { markdown: string; onWikiLink: (slug
   return <>{blocks}</>
 }
 
+/** Слаг статьи из URL /wiki/<slug> (History API, без роутер-зависимости). */
+function slugFromPath(): string {
+  const m = window.location.pathname.match(/^\/wiki\/(.+?)\/?$/)
+  return m ? decodeURIComponent(m[1]) : ''
+}
+
 /** Секция «Летопись Теслы»: поиск + каталог + читалка статей. */
 export default function WikiSection(): React.JSX.Element {
   const [pages, setPages] = useState<WikiNode[]>([])
   const [failed, setFailed] = useState(false)
   const [query, setQuery] = useState('')
   const [cat, setCat] = useState<string>('all')
-  const [slug, setSlug] = useState<string | null>(null)
+  // Ленивый инициализатор useState: слаг из URL читается один раз при монтировании.
+  // Source: https://react.dev/reference/react/useState#parameters
+  const [slug, setSlug] = useState<string>(slugFromPath)
   const [article, setArticle] = useState<WikiPageData | null>(null)
   const [articleLoading, setArticleLoading] = useState(false)
+  const [articleMissing, setArticleMissing] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -175,17 +199,48 @@ export default function WikiSection(): React.JSX.Element {
     }
   }, [])
 
-  const open = (s: string): void => {
-    setSlug(s)
+  // Назад/вперёд браузера: слаг всегда из URL.
+  // Source: https://developer.mozilla.org/en-US/docs/Web/API/Window/popstate_event
+  useEffect(() => {
+    const onPop = (): void => setSlug(slugFromPath())
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+
+  // Статья грузится по слагу: стартовый из URL, дальше — из open().
+  useEffect(() => {
+    if (!slug) {
+      setArticle(null)
+      setArticleMissing(false)
+      return
+    }
+    let alive = true
     setArticle(null)
+    setArticleMissing(false)
     setArticleLoading(true)
     api
-      .wikiPage(s)
+      .wikiPage(slug)
       .then((a) => {
+        if (!alive) return
         setArticle(a)
         setArticleLoading(false)
       })
-      .catch(() => setArticleLoading(false))
+      .catch(() => {
+        if (!alive) return
+        setArticleLoading(false)
+        setArticleMissing(true)
+      })
+    return () => {
+      alive = false
+    }
+  }, [slug])
+
+  const open = (s: string): void => {
+    if (s === slug) return
+    // pushState меняет URL без перезагрузки; popstate на него не стреляет — setSlug вручную.
+    // Source: https://developer.mozilla.org/en-US/docs/Web/API/History/pushState
+    window.history.pushState(null, '', `/wiki/${s}`)
+    setSlug(s)
   }
 
   const cats = useMemo(() => {
@@ -287,18 +342,27 @@ export default function WikiSection(): React.JSX.Element {
                     <div style={{ marginTop: 18, borderTop: '1px solid rgba(122,62,230,0.25)', paddingTop: 12 }}>
                       <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#9D65FF', marginBottom: 8 }}>Источники</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                        {article.sources.slice(0, 10).map((u) => (
-                          <a key={u} href={u} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: '#B79CFF', overflowWrap: 'anywhere' }}>{u}</a>
-                        ))}
+                        {article.sources.slice(0, 10).map((u, idx, arr) => {
+                          const wallCount = arr.filter((x) => WALL_RE.test(x)).length
+                          const label = WALL_RE.test(u) && wallCount > 1 ? `пост VK · ${idx + 1}` : vkLabel(u, u)
+                          return (
+                            <a key={u} href={u} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: '#B79CFF', overflowWrap: 'anywhere' }}>
+                              {label}
+                            </a>
+                          )
+                        })}
                       </div>
                     </div>
                   )}
                 </>
               )}
-              {!articleLoading && !article && (
+              {!articleLoading && !article && !articleMissing && (
                 <div style={{ color: '#8E86A8', fontSize: 14, lineHeight: 1.6 }}>
                   Выбери статью в каталоге — текст откроется здесь. Пунктирные ссылки внутри статей ведут на связанные страницы.
                 </div>
+              )}
+              {!articleLoading && articleMissing && (
+                <div style={{ color: '#FF9D9D', fontSize: 14 }}>Такой статьи в Летописи нет. Выбери другую в каталоге.</div>
               )}
             </div>
           </div>
