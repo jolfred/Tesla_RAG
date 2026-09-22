@@ -368,6 +368,32 @@ class GraphRAGSearcher:
         plan_sink: list = []
         answer_sink: list = []
 
+        if not project_slug:  # wiki-first; в проектах — старый путь
+            try:
+                from backend.wiki.loop import try_wiki_answer
+
+                with _lf.observation("wiki_loop", input=question) as wsp:
+                    wr = try_wiki_answer(question)
+                    wsp.update(output=(wr or {}).get("answer", "")[:500])
+                if wr and wr.get("answer"):
+                    root.update(output=wr["answer"], metadata={"mode": "wiki", "pages": wr.get("pages", [])})
+                    return {
+                        "answer": wr["answer"],
+                        "sources": wr.get("sources", []),
+                        "media": [],
+                        "previews": [],
+                        "mode": "wiki",
+                        "facts_count": len(wr.get("pages", [])),
+                        "posts_used": len(wr.get("sources", [])),
+                        "context": {"wiki_pages": wr.get("pages", [])} if include_context else None,
+                        "trace": None,
+                        "trace_id": _lf.current_trace_id(),
+                        "calls": None,
+                        "llm_calls": 0,
+                    }
+            except Exception as e:
+                logger.warning("wiki_loop failed, fallback to RAG: %s", e)
+
         if project_slug:
             from backend.admin.indexing import project_collection, project_source_model
 

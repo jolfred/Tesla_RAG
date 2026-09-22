@@ -160,6 +160,41 @@ class GigaChatClient:
             )
         return result
 
+    def chat_with_functions(
+        self,
+        messages: list[dict],
+        functions: list[dict],
+        function_call: str | dict = "auto",
+        model: str | None = None,
+        timeout: float = 120.0,
+    ) -> dict:
+        """Нативный function calling: возвращает сырое message + finish_reason."""
+        token = self._get_token()
+        r = httpx.post(
+            f"{self._base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "model": model or self._model,
+                "messages": messages,
+                "functions": functions,
+                "function_call": function_call,
+            },
+            verify=False,
+            timeout=timeout,
+        )
+        r.raise_for_status()
+        choice = r.json()["choices"][0]
+        msg = choice.get("message") or {}
+        try:
+            u = r.json().get("usage") or {}
+            self.last_usage = {
+                "input": u.get("prompt_tokens", 0) or 0,
+                "output": u.get("completion_tokens", 0) or 0,
+            }
+        except Exception:
+            self.last_usage = None
+        return {"message": msg, "finish_reason": choice.get("finish_reason")}
+
     def extract_json(
         self,
         system_prompt: str,

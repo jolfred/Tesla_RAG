@@ -17,6 +17,7 @@ const MODE_LABELS: Record<string, string> = {
   local: 'Локальный',
   global: 'Глобальный',
   basic: 'Базовый',
+  wiki: 'По Летописи',
 }
 
 /** Короткая подпись гиперссылки: vk.com › wall-9174… */

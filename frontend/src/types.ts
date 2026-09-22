@@ -1,6 +1,6 @@
 export type Role = 'user' | 'admin'
 
-export type ChatMode = 'struct' | 'local' | 'global' | 'basic'
+export type ChatMode = 'struct' | 'local' | 'global' | 'basic' | 'wiki'
 
 // --- Auth (FR-1.x) ---
 
