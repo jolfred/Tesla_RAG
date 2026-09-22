@@ -359,7 +359,16 @@ class GraphRAGSearcher:
         """
         with _lf.observation("answer", input=question) as root:
             try:
-                return self._search_inner(question, top_k, include_context, root, project_slug)
+                result = self._search_inner(question, top_k, include_context, root, project_slug)
+                # Ссылки на VK-посты -> ссылки нашей вики, где пост процитирован.
+                try:
+                    from backend.wiki.citations import rewrite_answer_links
+
+                    if result.get("answer"):
+                        result["answer"] = rewrite_answer_links(result["answer"])
+                except Exception as e:
+                    logger.warning("citation rewrite failed: %s", e)
+                return result
             finally:
                 _lf.flush()
 
