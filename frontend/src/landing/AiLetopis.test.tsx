@@ -131,4 +131,22 @@ describe('AiLetopis: карусель превью, гиперссылки', () 
     expect(screen.queryByLabelText('Предпросмотр поста ВКонтакте')).toBeNull()
     expect(screen.queryByText(/Пост 1 \//)).toBeNull()
   })
+
+  it('markdown-ссылка [текст](url) рендерится якорем с текстом', async () => {
+    cleanup()
+    mockChat({ ...CHAT, answer: 'Подробности в [юбилейном посте](https://vk.com/wall-91740386_9511).' })
+    render(
+      <AuthProvider>
+        <AiLetopis />
+      </AuthProvider>,
+    )
+    fireEvent.change(screen.getByPlaceholderText(/Спроси ИИ Летопись/i), {
+      target: { value: 'вопрос с markdown' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Спросить/ }))
+    await waitFor(() => expect(screen.getByText('ВЫДЕРЖКА ИЗ БАЗЫ ШТАБА')).toBeTruthy())
+    const link = screen.getByRole('link', { name: 'юбилейном посте' })
+    expect(link.getAttribute('href')).toBe('https://vk.com/wall-91740386_9511')
+    expect(screen.queryByText(/\[юбилейном посте\]/)).toBeNull()
+  })
 })

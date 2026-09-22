@@ -33,17 +33,18 @@ function shortLabel(url: string): string {
   }
 }
 
-/** Текст ответа со ссылками-гиперссылками вместо голых URL. */
+/** Текст ответа со ссылками-гиперссылками вместо голых URL; понимает и markdown [текст](url). */
 function Linkified({ text }: { text: string }): React.JSX.Element {
   const parts: React.ReactNode[] = []
-  const re = /(https?:\/\/[^\s<>"'\]]+)/g
+  const re = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|(https?:\/\/[^\s<>"'\]]+)/g
   let last = 0
   let m: RegExpExecArray | null
   let i = 0
   while ((m = re.exec(text)) !== null) {
-    let url = m[1]
-    // Отрезаем прилипшую пунктуацию и скобки: "…9511]." -> "…9511"
-    const tail = url.match(/[.,!?;:)\]}'"]+$/)
+    const mdLabel = m[1]
+    let url = m[2] ?? m[3]
+    // Отрезаем прилипшую пунктуацию и скобки: "…9511]." -> "…9511" (только для голых URL)
+    const tail = !m[2] ? url.match(/[.,!?;:)\]}'"]+$/) : null
     let suffix = ''
     if (tail) {
       suffix = tail[0]
@@ -52,11 +53,11 @@ function Linkified({ text }: { text: string }): React.JSX.Element {
     if (m.index > last) parts.push(text.slice(last, m.index))
     parts.push(
       <a key={i++} href={url} target="_blank" rel="noreferrer" style={{ color: '#B79CFF' }}>
-        {shortLabel(url)}
+        {mdLabel ?? shortLabel(url)}
       </a>,
     )
     if (suffix) parts.push(suffix)
-    last = m.index + m[1].length
+    last = m.index + m[0].length
   }
   if (last < text.length) parts.push(text.slice(last))
   return <>{parts}</>

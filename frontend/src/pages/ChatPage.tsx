@@ -16,6 +16,7 @@ const MODE_LABELS: Record<ChatMode, string> = {
   local: 'Локальный',
   global: 'Глобальный',
   basic: 'Базовый',
+  wiki: 'По Летописи',
 }
 
 // Панель «Рентген»: окна = отдельные вызовы модели (только для admin).
