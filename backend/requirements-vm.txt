@@ -14,3 +14,4 @@ openai>=1.0.0
 qdrant-client>=1.11.0
 neo4j>=5.24.0
 langfuse==4.15.3
+python-multipart>=0.0.9
