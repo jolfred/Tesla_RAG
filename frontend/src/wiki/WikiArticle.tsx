@@ -208,6 +208,8 @@ export default function WikiArticle({ slug }: { slug: string }): React.JSX.Eleme
 
 function ArticleView({ article }: { article: WikiPageData }): React.JSX.Element {
   const [title, rest] = splitTitle(article.markdown, article.slug)
+  const shown = article.sources.slice(0, 10)
+  const wallCount = shown.filter((x) => WALL_RE.test(x)).length
   return (
     <article>
       <div style={{ marginTop: 16, fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.12em', color: '#6D28D9' }}>
@@ -223,9 +225,7 @@ function ArticleView({ article }: { article: WikiPageData }): React.JSX.Element 
             Источники
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {(() => {
-              const wallCount = article.sources.slice(0, 10).filter((x) => WALL_RE.test(x)).length
-              return article.sources.slice(0, 10).map((u, idx) => {
+            {shown.map((u, idx) => {
               const label = WALL_RE.test(u) && wallCount > 1 ? `пост VK · ${idx + 1}` : vkLabel(u, u)
               return (
                 <a key={u} href={u} target="_blank" rel="noreferrer" style={{ fontSize: 14, color: '#6D28D9', overflowWrap: 'anywhere' }}>

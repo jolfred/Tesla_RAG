@@ -28,7 +28,10 @@ export default function WikiCatalog(): React.JSX.Element {
 
   const cats = useMemo(() => {
     const m = new Map<string, number>()
-    for (const p of pages) m.set(categoryOf(p.kind), (m.get(categoryOf(p.kind)) ?? 0) + 1)
+    for (const p of pages) {
+      const c = categoryOf(p.kind)
+      m.set(c, (m.get(c) ?? 0) + 1)
+    }
     return [...m.entries()].sort((a, b) => b[1] - a[1])
   }, [pages])
 
