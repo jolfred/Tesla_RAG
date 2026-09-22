@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from backend.api.auth import verify_user
-from backend.api.routes import admin, auth, chat, communities, documents, status
+from backend.api.routes import admin, auth, chat, communities, documents, status, wiki
 from backend.config import FRONTEND_DIST
 from backend.utils.logger import setup_logger
 
@@ -26,6 +26,7 @@ app.add_middleware(
 # Public endpoints
 app.include_router(status.router, tags=["status"])
 app.include_router(auth.router, tags=["auth"])
+app.include_router(wiki.router, tags=["wiki"])
 
 # User-protected endpoints (Bearer-токен ИЛИ X-API-Key, FR-1.6)
 app.include_router(chat.router, tags=["chat"])

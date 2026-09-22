@@ -7,6 +7,10 @@ import type {
   MeResponse,
   StatusResponse,
   VkRequest,
+  WikiGraphData,
+  WikiNode,
+  WikiPageData,
+  WikiSearchItem,
 } from '../types'
 
 export class ApiError extends Error {
@@ -96,6 +100,24 @@ export class ApiClient {
 
   status(): Promise<StatusResponse> {
     return this.request<StatusResponse>('/api/v1/status')
+  }
+
+  wikiPages(): Promise<{ pages: WikiNode[] }> {
+    return this.request<{ pages: WikiNode[] }>('/api/v1/wiki/pages')
+  }
+
+  wikiGraph(): Promise<WikiGraphData> {
+    return this.request<WikiGraphData>('/api/v1/wiki/graph')
+  }
+
+  wikiSearch(q: string): Promise<{ status: string; items: WikiSearchItem[] }> {
+    return this.request<{ status: string; items: WikiSearchItem[] }>(
+      `/api/v1/wiki/search?q=${encodeURIComponent(q)}`,
+    )
+  }
+
+  wikiPage(slug: string): Promise<WikiPageData> {
+    return this.request<WikiPageData>(`/api/v1/wiki/page?slug=${encodeURIComponent(slug)}`)
   }
 }
 

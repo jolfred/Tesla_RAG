@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 
 import AiLetopis from './AiLetopis'
 import MagneticField from './MagneticField'
+import WikiSection from '../wiki/WikiSection'
 import teslaHeaderLogo from '../assets/logos/tesla.jpg'
 import { ALUMNI, COMSOSTAV, DIRECTIONS, EVENTS, METRICS, SQUADS, TIMELINE, kgeuLogo, trudKrutLogo, trudLogo } from './data'
 
@@ -189,6 +190,8 @@ export default function LandingPage(): React.JSX.Element {
       </section>
 
       <Marquee />
+
+      <WikiSection />
 
       {/* НАПРАВЛЕНИЯ */}
       <section style={{ maxWidth: 1120, margin: '0 auto', padding: '84px 20px 12px' }}>

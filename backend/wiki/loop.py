@@ -88,10 +88,43 @@ SYSTEM = (
 )
 
 _SLUG_RE = re.compile(r"^[a-z0-9_/]+$")
+_TITLE_RE = re.compile(r"(?m)^# (.+?)\s*$")
+_KIND_RE = re.compile(r"(?m)^kind:\s*(\S+)\s*$")
 _LINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 _MD_URL_RE = re.compile(r"\[[^\]]*\]\((https://[^)]+)\)")
 _SKIP = {"AGENTS.md", "log.md"}
 _NOINDEX = {"index.md", "timeline.md"}  # навигация: читается, но в поиске не участвует
+
+
+def page_meta(slug: str, path: Path) -> dict:
+    """Заголовок (первый `# ...`) и kind (frontmatter, иначе верхний каталог)."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {"slug": slug, "title": slug, "kind": slug.split("/")[0] if "/" in slug else "wiki"}
+    m = _TITLE_RE.search(text)
+    k = _KIND_RE.search(text)
+    title = (m.group(1).strip() if m else slug)[:120]
+    kind = k.group(1).strip() if k else (slug.split("/")[0] if "/" in slug else "wiki")
+    return {"slug": slug, "title": title, "kind": kind}
+
+
+def wiki_graph() -> dict:
+    """Узлы — страницы, рёбра — [[ссылки]] на существующие страницы."""
+    pages = _pages()
+    nodes = [page_meta(s, p) for s, p in sorted(pages.items())]
+    seen: set[tuple[str, str]] = set()
+    edges = []
+    for slug, path in pages.items():
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for target in set(_LINK_RE.findall(text)):
+            if target in pages and target != slug and (slug, target) not in seen:
+                seen.add((slug, target))
+                edges.append({"source": slug, "target": target})
+    return {"nodes": nodes, "edges": edges}
 
 
 def _pages() -> dict[str, Path]:

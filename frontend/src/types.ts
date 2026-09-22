@@ -68,6 +68,38 @@ export interface ChatResponse {
   calls?: CallWindow[] | null
 }
 
+// --- Wiki (Летопись) ---
+
+export interface WikiNode {
+  slug: string
+  title: string
+  kind: string
+}
+
+export interface WikiEdge {
+  source: string
+  target: string
+}
+
+export interface WikiGraphData {
+  nodes: WikiNode[]
+  edges: WikiEdge[]
+}
+
+export interface WikiPageData {
+  status: string
+  slug: string
+  markdown: string
+  links: string[]
+  sources: string[]
+}
+
+export interface WikiSearchItem {
+  slug: string
+  section: string
+  snippet: string
+}
+
 // --- Status (FR-4.x) ---
 
 export interface StatusResponse {
