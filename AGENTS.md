@@ -1,6 +1,6 @@
 # AGENTS.md
 
-GraphRAG-сервис для Штаба СО КГЭУ «Тесла». VK-посты → граф (Neo4j) + векторный индекс (Qdrant) → Louvain-сообщества → ответы через GigaChat. Работает только с серверами Docker (`docker compose up -d qdrant neo4j`); Python-venv в `.venv`.
+GraphRAG-сервис для Штаба СО КГЭУ «Тесла». Ответы идут wiki-first (`storage/wiki/*.md` через `backend/wiki/loop.py` + GigaChat); legacy-путь: VK-посты → граф (Neo4j) + векторный индекс (Qdrant) → Louvain-сообщества. Индексация работает только с серверами Docker (`docker compose up -d qdrant neo4j`); Python-venv в `.venv`.
 
 ## GitHub (обязательно)
 
@@ -10,12 +10,19 @@ GraphRAG-сервис для Штаба СО КГЭУ «Тесла». VK-пос�
 - Активная ветка лендинга — `gid-web`. Перед пушем: `git status`, `git diff --stat`; секреты (`.env`) не коммитить.
 - `storage/` в `.gitignore` — в гит идут только код и конфиги. Контент вики (`storage/wiki/`) в гит НЕ пушится, а синкается к Кириллу (см. «Синк к Кириллу»).
 
+## SSH-ключи (где лежат)
+
+- GitHub-пуш (`upstream`): `~/.ssh/id_ed25519` (коммент `opencode-wsl`), публичный ключ прописан в аккаунте jolfred. `ssh -T git@github.com` → `Hi jolfred!`.
+- ВМ Кирилла: ключ Кирилла (коммент `kirill.lytkin.2003@mail.ru`); здесь — `~/.ssh/vm_jolfred` (`chmod 600`), у пользователя — `C:\Users\Alfred\.ssh\jolfred(.pub)`. Ключ каждый раз даёт пользователь; в чат повторно не вставлять, в репозиторий не класть.
+- Первое подключение к новому хосту: `StrictHostKeyChecking=accept-new` один раз, дальше fingerprint уже в `~/.ssh/known_hosts`.
+
 ## Синк к Кириллу (обязательно при любом новом контенте/коде)
 
 - Правило: добавил/обновил вики-страницы или код → сразу синк к Кириллу, не откладывать. Код уезжает через GitHub-пуш (см. выше), вики-контент — rsync поверх (gitignored).
-- Доступ: SSH-ключ каждый раз даёт пользователь (файл, `chmod 600`); ключи в чат повторно не вставлять, в репозиторий не класть.
-- Вики (138+ md, `storage/wiki/`): `rsync -avz --delete -e "ssh -i <KEY> -o StrictHostKeyChecking=no" storage/wiki/ jolfred@<HOST>:<REPO>/storage/wiki/` (точный HOST и путь — уточнить у пользователя при первом синке; после — вписать сюда).
-- После синка кода на стороне Кирилла: `git pull` + рестарт API (`scripts/restart_api.sh`) + проверка вопросом ИИ-Летописи end-to-end.
+- Цель: `jolfred@192.168.10.160:~/Tesla_RAG` (ВМ, Ubuntu 24.04). Ключ: `~/.ssh/vm_jolfred`.
+- Вики (138+ md, `storage/wiki/`): `rsync -avz --delete -e "ssh -i ~/.ssh/vm_jolfred -o StrictHostKeyChecking=no" storage/wiki/ jolfred@192.168.10.160:~/Tesla_RAG/storage/wiki/`
+- Код на ВМ: `git pull` (клонировано `--depth 1 -b gid-web` по HTTPS, без ключа).
+- После синка: рестарт API на ВМ (systemd `tesla-api`, см. «Деплой») + проверка вопросом ИИ-Летописи end-to-end через домен.
 - Проверка синка вики: `find storage/wiki -name '*.md' | wc -l` с обеих сторон должно совпасть.
 
 ## Команды
@@ -109,14 +116,17 @@ docker run --rm -v $PWD/frontend:/app -v graphrag_npm_cache:/root/.npm -w /app n
 - Сообщества: Neo4j → `build_communities.py` → `storage/communities.json` (используется для global-режима).
 - Ответы: вопрос → `searcher.search()` → план (`query_planner`) → источники `group://` и `vk.com` в ответе.
 
-## Деплой лендинга (ВМ Кирилла, фронт-only)
+## Деплой (ВМ Кирилла: фронт + wiki-API, без Neo4j)
 
-- ВМ: `jolfred@192.168.10.160` (Ubuntu 24.04, 1 CPU, ~576МБ RAM — хватает только на статику). SSH-ключ каждый раз даёт пользователь (файл, `chmod 600`); приватные ключи в чат не вставлять повторно, в репозиторий не класть.
-- Схема: на ВМ только nginx + собранный `frontend/dist`; RAG-стек (API:8000, Neo4j, Qdrant) и Langfuse остаются здесь. Секреты на ВМ не везти.
-- Перед ВМ стоит HAProxy Кирилла: шлёт `sotesla-jolfred.deagly.tech` → `:80` с `send-proxy-v2`, сертификат терминирует балансировщик. Поэтому в nginx обязательно `listen 80 proxy_protocol` + `real_ip_header proxy_protocol`, иначе ляжет и трафик, и хелсчек. `/api/` → `proxy_pass` сюда (таймаут ≥120с под GigaChat), `/` → статика, gzip вкл.
+- ВМ: `jolfred@192.168.10.160` (Ubuntu 24.04, 1 CPU, ~576МБ RAM). Neo4j/Qdrant/Langfuse туда НЕ едут: ответы идут wiki-first (`backend/wiki/loop.py` читает `storage/wiki/*.md` + GigaChat), фолбэк в RAG без сервисов молча деградирует. 576МБ хватает на nginx + API (~250МБ).
+- Репозиторий на ВМ: `~/Tesla_RAG` (клон `--depth 1 -b gid-web` по HTTPS). Python: системный 3.12 + `python3-venv`, окружение `~/Tesla_RAG/.venv-vm`, зависимости ТОЛЬКО из `backend/requirements-vm.txt` (slim: без torch/transformers/langchain — в рантайме их нет, импорты ленивые; если `import backend.main` упадёт — добавить пакет туда же).
+- `.env` копируется scp напрямую (секреты!): `scp -i ~/.ssh/vm_jolfred .env jolfred@192.168.10.160:~/Tesla_RAG/.env`. В гит не класть.
+- API на ВМ — systemd-юнит `tesla-api` (`~/Tesla_RAG/.venv-vm/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000`, `Restart=always`, `WorkingDirectory=~/Tesla_RAG`). Рестарт: `sudo systemctl restart tesla-api`. Логи: `journalctl -u tesla-api`.
+- Порядок переключения с туннельной схемы: остановить туннель здесь (`kill` PID из `ps aux | grep vm_tunnel`; иначе займёт `:8000` на ВМ) → поднять API на ВМ → проверить `curl localhost:8000/api/v1/status` на ВМ → вопрос через домен.
+- Перед ВМ стоит HAProxy Кирилла: шлёт `sotesla-jolfred.deagly.tech` → `:80` с `send-proxy-v2`, сертификат терминирует балансировщик. Поэтому в nginx обязательно `listen 80 proxy_protocol` + `real_ip_header proxy_protocol`. `/api/` → `proxy_pass http://127.0.0.1:8000` (таймаут ≥120с под GigaChat), `/` → статика `/var/www/tesla` (собранный `frontend/dist`, заливается scp-тарболом отсюда — сборка только через Docker здесь), gzip вкл.
 - Риск: если хелсчек балансировщика идёт без PROXY-заголовка — просить у Кирилла `check-send-proxy` (его сторона, одна строка). По факту заработало без его участия.
-- ВМ не видит этот сервер напрямую, поэтому `/api/` идёт через reverse-туннель `scripts/vm_tunnel.sh` (`127.0.0.1:8000` на ВМ → API здесь; запуск через setsid+nohup, автопереподключение). Без живого туннеля ИИ-Летопись мёртв — проверять первым.
-- Проверка: вопрос ИИ-Летописи end-to-end через домен + логи nginx и `storage/logs/api.log`.
+- Старая туннельная схема (`scripts/vm_tunnel.sh`, reverse `:8000` сюда) — запасной вариант, если API на ВМ лёг. Проверка живого туннеля: `tail storage/logs/vm_tunnel.log`.
+- Проверка деплоя: вопрос ИИ-Летописи end-to-end через домен + `journalctl -u tesla-api` на ВМ.
 
 ## Мониторинг
 

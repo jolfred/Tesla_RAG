@@ -1,0 +1,16 @@
+# Slim-зависимости для ВМ Кирилла (фронт + wiki-first API, 576МБ RAM).
+# Здесь НЕТ: torch/transformers/sentence-transformers (эмбеддинги не нужны —
+# wiki-путь читает md + GigaChat; model.py импортирует их лениво),
+# langchain-* (рантайм их не импортирует), pdfplumber/python-docx/Pillow/pymorphy3
+# (нужны только индексатору/скраперу, на ВМ не запускаются).
+# Если `python -c "import backend.main"` ругнётся на отсутствие пакета —
+# добавить его сюда же.
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.9.0
+python-dotenv>=1.0.0
+httpx>=0.27.0
+openai>=1.0.0
+qdrant-client>=1.11.0
+neo4j>=5.24.0
+langfuse==4.15.3
