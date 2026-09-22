@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 
 import { api } from '../api/client'
-import type { WikiGraphData, WikiNode, WikiPageData } from '../types'
-import WikiGraph from './WikiGraph'
+import type { WikiNode, WikiPageData } from '../types'
 import { categoryOf, parseWikiLinks } from './wikilinks'
 
 const INLINE_RE = /(\*\*[^*]+\*\*|\[\[[^\]]+\]\]|\[[^\]]+\]\(https?:\/\/[^)\s]+\)|https?:\/\/[^\s<>"'\]]+)/g
@@ -150,10 +149,9 @@ function Article({ markdown, onWikiLink }: { markdown: string; onWikiLink: (slug
   return <>{blocks}</>
 }
 
-/** Секция «Летопись Теслы»: граф связей + поиск + каталог + читалка статей. */
+/** Секция «Летопись Теслы»: поиск + каталог + читалка статей. */
 export default function WikiSection(): React.JSX.Element {
   const [pages, setPages] = useState<WikiNode[]>([])
-  const [graph, setGraph] = useState<WikiGraphData | null>(null)
   const [failed, setFailed] = useState(false)
   const [query, setQuery] = useState('')
   const [cat, setCat] = useState<string>('all')
@@ -163,11 +161,11 @@ export default function WikiSection(): React.JSX.Element {
 
   useEffect(() => {
     let alive = true
-    Promise.all([api.wikiPages(), api.wikiGraph()])
-      .then(([p, g]) => {
+    api
+      .wikiPages()
+      .then((p) => {
         if (!alive) return
         setPages(p.pages ?? [])
-        setGraph({ nodes: g.nodes ?? [], edges: g.edges ?? [] })
       })
       .catch(() => {
         if (alive) setFailed(true)
@@ -213,7 +211,7 @@ export default function WikiSection(): React.JSX.Element {
           Летопись Теслы — отрядная википедия
         </h2>
         <p style={{ color: '#B9B0D6', fontSize: 15, lineHeight: 1.65, marginTop: 10 }}>
-          {pages.length > 0 ? `${pages.length} статей и ${graph?.edges.length ?? '…'} связей` : 'Статьи штаба, люди и события'} — граф, поиск и тексты из архива. Клик по узлу открывает статью.
+          {pages.length > 0 ? `${pages.length} статей штаба, люди и события` : 'Статьи штаба, люди и события'} — поиск и тексты из архива.
         </p>
       </div>
 
@@ -223,8 +221,6 @@ export default function WikiSection(): React.JSX.Element {
         </div>
       ) : (
         <>
-          <div style={{ marginTop: 24 }}>{graph ? <WikiGraph data={graph} selected={slug} onSelect={open} /> : <div className="glass-card" style={{ borderRadius: 20, height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8E86A8', fontSize: 14 }}>Строим граф связей…</div>}</div>
-
           <div style={{ display: 'flex', gap: 10, marginTop: 18, flexWrap: 'wrap' }}>
             <input
               value={query}
@@ -301,7 +297,7 @@ export default function WikiSection(): React.JSX.Element {
               )}
               {!articleLoading && !article && (
                 <div style={{ color: '#8E86A8', fontSize: 14, lineHeight: 1.6 }}>
-                  Выбери статью в каталоге или кликни по узлу графа — текст откроется здесь. Пунктирные ссылки внутри статей ведут на связанные страницы.
+                  Выбери статью в каталоге — текст откроется здесь. Пунктирные ссылки внутри статей ведут на связанные страницы.
                 </div>
               )}
             </div>

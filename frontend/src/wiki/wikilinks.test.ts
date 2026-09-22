@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { categoryOf, layoutGraph, parseWikiLinks } from './wikilinks'
-import type { WikiEdge, WikiNode } from '../types'
+import { categoryOf, parseWikiLinks } from './wikilinks'
 
 describe('parseWikiLinks', () => {
   it('разбирает [[slug|лейбл]] и [[slug]]', () => {
@@ -26,28 +25,5 @@ describe('categoryOf', () => {
     expect(categoryOf('lso/spo_yunost')).toBe('squad')
     expect(categoryOf('hq/index')).toBe('hq')
     expect(categoryOf('index')).toBe('wiki')
-  })
-})
-
-describe('layoutGraph', () => {
-  const nodes: WikiNode[] = [
-    { slug: 'lso/spo_yunost', title: 'СПО «Юность»', kind: 'squad' },
-    { slug: 'persons/bogachev_egor', title: 'Богачёв Егор', kind: 'person' },
-    { slug: 'hq/index', title: 'Штаб', kind: 'hq' },
-  ]
-  const edges: WikiEdge[] = [{ source: 'lso/spo_yunost', target: 'persons/bogachev_egor' }]
-
-  it('детерминирован, все в границах, позиции разные', () => {
-    const a = layoutGraph(nodes, edges, 600, 400)
-    expect(a).toEqual(layoutGraph(nodes, edges, 600, 400))
-    const pts = Object.values(a)
-    expect(pts).toHaveLength(3)
-    for (const [x, y] of pts) {
-      expect(x).toBeGreaterThanOrEqual(0)
-      expect(x).toBeLessThanOrEqual(600)
-      expect(y).toBeGreaterThanOrEqual(0)
-      expect(y).toBeLessThanOrEqual(400)
-    }
-    expect(new Set(pts.map(([x, y]) => `${Math.round(x)},${Math.round(y)}`)).size).toBe(3)
   })
 })

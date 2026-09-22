@@ -4,9 +4,14 @@ import { AuthProvider } from './auth/authContext'
 import AdminApp from './admin/AdminApp'
 import teslaFavicon from './assets/logos/tesla.jpg'
 import LandingPage from './landing/LandingPage'
+import WikiPage from './wiki/WikiPage'
 
 function isAdminPath(): boolean {
   return typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')
+}
+
+function isWikiPath(): boolean {
+  return typeof window !== 'undefined' && window.location.pathname.startsWith('/wiki')
 }
 
 function ThemedApp(): React.JSX.Element {
@@ -25,6 +30,9 @@ function ThemedApp(): React.JSX.Element {
   }, [])
   if (isAdminPath()) {
     return <AdminApp />
+  }
+  if (isWikiPath()) {
+    return <WikiPage />
   }
   return <LandingPage />
 }

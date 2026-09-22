@@ -3,7 +3,6 @@ import { motion } from 'framer-motion'
 
 import AiLetopis from './AiLetopis'
 import MagneticField from './MagneticField'
-import WikiSection from '../wiki/WikiSection'
 import teslaHeaderLogo from '../assets/logos/tesla.jpg'
 import { ALUMNI, COMSOSTAV, DIRECTIONS, EVENTS, METRICS, SQUADS, TIMELINE, kgeuLogo, trudKrutLogo, trudLogo } from './data'
 
@@ -92,22 +91,38 @@ function Header(): React.JSX.Element {
           <div style={{ fontSize: 12, color: '#8E86A8', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Штаб СО КГЭУ</div>
         </div>
       </div>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          fontSize: 12,
-          fontWeight: 700,
-          border: '1px solid rgba(122,62,230,0.4)',
-          background: 'rgba(122,62,230,0.12)',
-          borderRadius: 999,
-          padding: '8px 14px',
-          color: '#D9CCFF',
-        }}
-      >
-        <span style={{ width: 8, height: 8, borderRadius: 999, background: '#9D65FF', animation: 'pulseGlow 3.2s ease-in-out infinite' }} />
-        Ограниченный набор 2026 активен
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <a
+          href="/wiki"
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            color: '#D9CCFF',
+            textDecoration: 'none',
+            border: '1px solid rgba(255,255,255,0.16)',
+            borderRadius: 999,
+            padding: '8px 16px',
+          }}
+        >
+          Летопись →
+        </a>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: 12,
+            fontWeight: 700,
+            border: '1px solid rgba(122,62,230,0.4)',
+            background: 'rgba(122,62,230,0.12)',
+            borderRadius: 999,
+            padding: '8px 14px',
+            color: '#D9CCFF',
+          }}
+        >
+          <span style={{ width: 8, height: 8, borderRadius: 999, background: '#9D65FF', animation: 'pulseGlow 3.2s ease-in-out infinite' }} />
+          Ограниченный набор 2026 активен
+        </div>
       </div>
     </motion.header>
   )
@@ -190,8 +205,6 @@ export default function LandingPage(): React.JSX.Element {
       </section>
 
       <Marquee />
-
-      <WikiSection />
 
       {/* НАПРАВЛЕНИЯ */}
       <section style={{ maxWidth: 1120, margin: '0 auto', padding: '84px 20px 12px' }}>
