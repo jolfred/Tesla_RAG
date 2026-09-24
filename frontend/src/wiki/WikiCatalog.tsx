@@ -8,8 +8,9 @@ import { categoryOf } from './wikilinks'
 export default function WikiCatalog(): React.JSX.Element {
   const [pages, setPages] = useState<WikiNode[]>([])
   const [failed, setFailed] = useState(false)
-  const [query, setQuery] = useState('')
-  const [cat, setCat] = useState<string>('all')
+  // Начальные фильтры из URL: /wiki?q=…&cat=…
+  const [query, setQuery] = useState(() => new URLSearchParams(window.location.search).get('q') ?? '')
+  const [cat, setCat] = useState<string>(() => new URLSearchParams(window.location.search).get('cat') ?? 'all')
 
   useEffect(() => {
     let alive = true
@@ -43,11 +44,11 @@ export default function WikiCatalog(): React.JSX.Element {
   }, [pages, query, cat])
 
   return (
-    <div style={{ maxWidth: 860, margin: '0 auto', padding: '40px 20px 80px' }}>
+    <div>
       <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '0.14em', textTransform: 'uppercase', color: '#6D28D9' }}>
         Летопись
       </div>
-      <h1 className="tesla-display" style={{ fontSize: 'clamp(30px, 5vw, 46px)', lineHeight: 1.1, margin: '10px 0 0', color: '#211B16' }}>
+      <h1 style={{ fontFamily: "'PT Serif', Georgia, serif", fontWeight: 400, fontSize: 'clamp(30px, 5vw, 44px)', lineHeight: 1.15, margin: '10px 0 0', paddingBottom: 8, borderBottom: '1px solid #a2a9b1', color: '#202122' }}>
         Отрядная википедия Теслы
       </h1>
       <p style={{ color: '#6F6459', fontSize: 16, lineHeight: 1.65, margin: '12px 0 0', maxWidth: '60ch' }}>

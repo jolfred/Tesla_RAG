@@ -43,4 +43,17 @@ describe('WikiCatalog', () => {
     render(<WikiCatalog />)
     expect(await screen.findByText(/Не удалось загрузить/i)).toBeTruthy()
   })
+
+  it('начальные ?q= и ?cat= из URL', async () => {
+    window.history.pushState({}, '', '/wiki/?q=юность&cat=squad')
+    try {
+      render(<WikiCatalog />)
+      const list = await screen.findByRole('list', { name: 'Каталог статей' })
+      expect(screen.getByPlaceholderText(/Найти статью/i)).toHaveProperty('value', 'юность')
+      await waitFor(() => expect(within(list).queryByRole('link', { name: /Богачёв Егор/ })).toBeNull())
+      expect(within(list).getByRole('link', { name: /СПО «Юность»/ })).toBeTruthy()
+    } finally {
+      window.history.pushState({}, '', '/wiki')
+    }
+  })
 })

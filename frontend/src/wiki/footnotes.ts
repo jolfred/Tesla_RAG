@@ -35,6 +35,14 @@ export function unwrapBracketedUrls(md: string): string {
   return md.replace(BRACKETED_URL, '$1')
 }
 
+/** (Источник: …) вырезать целиком (для инфобокса: детали остаются в теле статьи). */
+export function stripCites(md: string): string {
+  return md
+    .replace(CITE_RE, '')
+    .replace(/\s+([.,;:!?])/g, '$1')
+    .replace(/[ \t]{2,}/g, ' ')
+}
+
 /**
  * Цитаты постов VK -> компактные сноски [n](#ref-n).
  * Возвращает текст и нумерованный список источников (порядок первого упоминания, повторы — тот же номер).

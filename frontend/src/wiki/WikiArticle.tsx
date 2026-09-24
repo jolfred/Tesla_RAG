@@ -2,9 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react'
 
 import { api } from '../api/client'
 import type { WikiNode, WikiPageData } from '../types'
-import { autolinkMentions, extractFootnotes, wikiLinksToMd, type FootRef, type LinkEntry } from './footnotes'
+import { autolinkMentions, extractFootnotes, stripCites, wikiLinksToMd, type FootRef, type LinkEntry } from './footnotes'
 import { Markdown } from './markdown'
-import { categoryOf } from './wikilinks'
+import { categoryOf, extractInfobox, extractToc, type InfoRow, type TocEntry } from './wikilinks'
 
 /** Frontmatter и служебный раздел «Источники данных» (локальные пути) вырезаны. */
 function stripService(markdown: string): string {
@@ -20,25 +20,87 @@ function stripService(markdown: string): string {
 }
 
 function ArticleView({ article, entries }: { article: WikiPageData; entries: LinkEntry[] }): React.JSX.Element {
-  const { text, refs } = useMemo(() => {
-    let body = stripService(article.markdown)
-    if (!/^#\s/m.test(body)) body = `# ${article.slug}\n\n${body}`
-    return extractFootnotes(autolinkMentions(wikiLinksToMd(body), entries, article.slug))
+  const { title, lead, rest, toc, rows, refs } = useMemo(() => {
+    const stripped = stripService(article.markdown)
+    const { rows, rest: noBox } = extractInfobox(stripped)
+    const toc = extractToc(noBox)
+    const full = extractFootnotes(autolinkMentions(wikiLinksToMd(noBox), entries, article.slug))
+    // Заголовок отдельно, лид — до первого ##, остальное — после (сноски нумеруются сквозно).
+    const m = /^#\s+(.+?)\s*$/m.exec(full.text)
+    const title = m ? m[1] : article.slug
+    const withoutTitle = m ? full.text.replace(m[0], '') : full.text
+    const cut = withoutTitle.search(/^##\s/m)
+    const lead = cut === -1 ? withoutTitle : withoutTitle.slice(0, cut)
+    const rest = cut === -1 ? '' : withoutTitle.slice(cut)
+    return { title, lead, rest, toc, rows, refs: full.refs }
   }, [article, entries])
 
   return (
-    <article>
-      <div style={{ marginTop: 16, fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.12em', color: '#6D28D9' }}>
-        {categoryOf(article.slug)}
-      </div>
-      <Markdown text={text} tone="light" />
+    <article className="wiki-body">
+      <div style={{ fontSize: 13, color: '#54595d', marginTop: 4 }}>Материал из Летописи Теслы — отрядной википедии</div>
+      <Markdown text={`# ${title}`} tone="light" />
+      <Infobox title={title} rows={rows} />
+      {lead.trim() && <Markdown text={lead} tone="light" />}
+      {toc.length >= 2 && <Toc toc={toc} />}
+      {rest.trim() && <Markdown text={rest} tone="light" />}
       {refs.length > 0 && <Notes refs={refs} />}
-      <div style={{ marginTop: 32 }}>
+      <div style={{ marginTop: 24, border: '1px solid #a2a9b1', background: '#f8f9fa', borderRadius: 2, padding: '10px 14px', fontSize: 13, color: '#202122' }}>
+        Категории:{' '}
+        <a href={`/wiki?cat=${categoryOf(article.slug)}`} style={{ color: '#3366CC', textDecoration: 'none' }}>
+          {categoryOf(article.slug)}
+        </a>
+      </div>
+      <div style={{ marginTop: 24 }}>
         <a href="/wiki" style={{ display: 'inline-block', fontSize: 14, fontWeight: 700, color: '#fff', background: '#7A3EE6', borderRadius: 999, padding: '12px 24px', textDecoration: 'none' }}>
           ← Все статьи
         </a>
       </div>
+      <style>{'@media (max-width: 720px) { .wiki-infobox { float: none !important; width: auto !important; margin: 16px 0 !important; } } .wiki-body a:hover { text-decoration: underline; }'}</style>
     </article>
+  )
+}
+
+/** Карточка справа: мета-буллиты из начала статьи (ссылки работают, цитаты вырезаны). */
+function Infobox({ title, rows }: { title: string; rows: InfoRow[] }): React.JSX.Element | null {
+  if (rows.length === 0) return null
+  return (
+    <aside role="complementary" aria-label="Карточка статьи" className="wiki-infobox" style={{ float: 'right', clear: 'right', width: 290, margin: '6px 0 16px 20px', border: '1px solid #a2a9b1', background: '#f8f9fa', fontSize: 13, lineHeight: 1.5 }}>
+      <div style={{ background: '#ede9fe', borderBottom: '1px solid #a2a9b1', padding: '8px 12px', fontWeight: 700, fontSize: 14, color: '#202122', textAlign: 'center' }}>
+        {title}
+      </div>
+      <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i} style={{ borderTop: i === 0 ? 'none' : '1px solid #eaecf0' }}>
+              <th scope="row" style={{ textAlign: 'left', verticalAlign: 'top', padding: '7px 8px 7px 12px', color: '#202122', fontWeight: 700, width: '38%' }}>
+                {r.k}
+              </th>
+              <td style={{ verticalAlign: 'top', padding: '7px 12px 7px 4px', color: '#202122' }}>
+                <Markdown text={wikiLinksToMd(stripCites(r.v)) || '—'} tone="light" />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </aside>
+  )
+}
+
+/** Содержание: якоря на разделы. */
+function Toc({ toc }: { toc: TocEntry[] }): React.JSX.Element {
+  return (
+    <nav aria-label="Содержание" style={{ display: 'inline-block', minWidth: 220, border: '1px solid #a2a9b1', background: '#f8f9fa', padding: '10px 16px', margin: '8px 0', fontSize: 13 }}>
+      <div style={{ fontWeight: 700, color: '#202122', marginBottom: 6 }}>Содержание</div>
+      <ol style={{ margin: 0, paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 3 }}>
+        {toc.map((t, i) => (
+          <li key={t.id}>
+            <a href={`#${t.id}`} style={{ color: '#3366CC', textDecoration: 'none' }}>
+              {i + 1} {t.text}
+            </a>
+          </li>
+        ))}
+      </ol>
+    </nav>
   )
 }
 
@@ -103,8 +165,8 @@ export default function WikiArticle({ slug }: { slug: string }): React.JSX.Eleme
   }, [slug])
 
   return (
-    <div style={{ maxWidth: 760, margin: '0 auto', padding: '40px 20px 80px' }}>
-      <a href="/wiki" style={{ fontSize: 14, fontWeight: 700, color: '#6D28D9', textDecoration: 'none' }}>
+    <div>
+      <a href="/wiki" style={{ fontSize: 13, color: '#3366CC', textDecoration: 'none' }}>
         ← Все статьи
       </a>
       {loading && <div style={{ marginTop: 24, color: '#6F6459', fontSize: 15 }}>Открываем статью…</div>}

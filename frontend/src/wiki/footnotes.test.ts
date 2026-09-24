@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { autolinkMentions, extractFootnotes, unwrapBracketedUrls, wikiLinksToMd } from './footnotes'
+import { autolinkMentions, extractFootnotes, stripCites, unwrapBracketedUrls, wikiLinksToMd } from './footnotes'
 
 describe('wikiLinksToMd', () => {
   it('[[slug|лейбл]] и [[slug]] -> markdown-ссылки на /wiki/', () => {
@@ -63,5 +63,13 @@ describe('autolinkMentions', () => {
 describe('unwrapBracketedUrls', () => {
   it('[https://…] -> голый URL', () => {
     expect(unwrapBracketedUrls('штаб [https://vk.com/rso_tesla?w=wall-1_2]. Приходи!')).toBe('штаб https://vk.com/rso_tesla?w=wall-1_2. Приходи!')
+  })
+})
+
+describe('stripCites', () => {
+  it('(Источник: …) вырезан целиком для инфобокса', () => {
+    expect(stripCites('07.10.2020 (Источник: описание группы `../groups/g.json`), девиз «Вперёд!»')).toBe(
+      '07.10.2020, девиз «Вперёд!»',
+    )
   })
 })
