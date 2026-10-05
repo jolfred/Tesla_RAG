@@ -261,10 +261,10 @@ def _exclusive_compile(function):
 def compile_wiki(db: Path, wiki: Path, run_dir: Path,
                  extract_prompt: Path, merge_prompt: Path, max_posts: int = 5,
                  batch_size: int = 50, char_budget: int = 40000,
-                 extract_model: str = "opencode/mimo-v2.6-flash-free",
-                 extract_fallback_models: tuple[str, ...] = ("opencode/nemotron-3-ultra-free", "opencode/longcat-2.5-preview-free"),
-                 merge_model: str = "opencode/mimo-v2.6-flash-free",
-                 merge_fallback_models: tuple[str, ...] = ("opencode/nemotron-3-ultra-free", "opencode/longcat-2.5-preview-free"),
+                 extract_model: str = "opencode/longcat-2.5-preview-free",
+                 extract_fallback_models: tuple[str, ...] = ("opencode/mimo-v2.6-flash-free", "opencode/nemotron-3-ultra-free"),
+                 merge_model: str = "opencode/longcat-2.5-preview-free",
+                 merge_fallback_models: tuple[str, ...] = ("opencode/mimo-v2.6-flash-free", "opencode/nemotron-3-ultra-free"),
                  do_apply: bool = False, codex_fallback: bool = True,
                  agent: str = "plan") -> dict[str, int]:
     if batch_size < 1 or batch_size > 50: raise ValueError("batch_size must be 1..50")
@@ -407,7 +407,7 @@ def call_provider_resilient(effort: str, system_prompt: Path, bundle_path: Path,
                             workdir: Path, free_models: tuple[str, ...], codex_fallback: bool,
                             agent: str, run_dir: Path) -> dict[str, Any]:
     failures = []
-    for free_model in free_models:
+    for free_model in dict.fromkeys(free_models):
         if free_model not in FREE_MODELS:
             failures.append({"model": free_model, "error": "model_not_allowlisted"}); continue
         try:

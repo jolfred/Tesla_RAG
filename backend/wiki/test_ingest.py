@@ -240,6 +240,15 @@ class IngestTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             opencode_command(self.root,'opencode/longcat-2.5-preview-free','plan','invalid')
 
+    def test_free_fallback_models_are_not_retried_when_duplicated(self):
+        from backend.wiki.ingest_runner import call_provider_resilient
+        model='opencode/longcat-2.5-preview-free'
+        with patch('backend.wiki.ingest_runner.call_provider',side_effect=RuntimeError('unavailable')) as provider:
+            with self.assertRaises(RuntimeError):
+                call_provider_resilient('low',self.root/'prompt',self.root/'bundle',self.root/'out.json',
+                                        self.root/'work',(model,model),False,'plan',self.root/'run')
+        self.assertEqual(provider.call_count,1)
+
     def test_quota_fallback_uses_both_actual_windows_and_strict_ten_percent_reserve(self):
         with patch('backend.wiki.ingest_runner.read_codex_limits',return_value={'primary_used_percent':90,'secondary_used_percent':20}):
             self.assertFalse(_codex_eligible(self.root/'quota'))
