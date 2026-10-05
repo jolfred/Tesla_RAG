@@ -229,7 +229,7 @@ def call_provider(provider: str, effort: str, system_prompt: Path, bundle_path: 
             staged_bundle = Path(isolated) / "input-bundle.json"
             shutil.copyfile(prompt_file, staged_prompt)
             shutil.copyfile(bundle_path, staged_bundle)
-            cmd = opencode_command(Path(isolated), model, agent)
+            cmd = opencode_command(Path(isolated), model, agent, effort)
             proc, stdout = _run_cli(cmd, isolated, output_path.with_suffix(".cli.log"))
         if proc.returncode != 0: raise RuntimeError(f"opencode exited {proc.returncode}; see CLI log")
         response = _opencode_text(stdout)

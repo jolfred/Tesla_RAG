@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 
 
-def opencode_command(work: Path, model: str, agent: str) -> list[str]:
+def opencode_command(work: Path, model: str, agent: str, effort: str = "low") -> list[str]:
     sandbox = shutil.which("bwrap")
     client = shutil.which("opencode")
     if not sandbox or not client:
@@ -44,4 +44,10 @@ def opencode_command(work: Path, model: str, agent: str) -> list[str]:
                 "Follow the attached system prompt and return only its requested JSON object. Use the attached input bundle as the complete context. No tools are needed.",
                 "--format","json", "--agent",agent, "--model",model, "--dir","/work",
                 "--file","/work/stage-instructions.md", "--file","/work/input-bundle.json"])
+    # The current official catalog exposes Low/Medium variants for LongCat.
+    # MiMo and Nemotron expose no variants: do not pretend they honor effort.
+    if model == "opencode/longcat-2.5-preview-free":
+        if effort not in {"low", "medium", "high"}:
+            raise ValueError("unsupported LongCat reasoning effort")
+        cmd.extend(["--variant", effort])
     return cmd

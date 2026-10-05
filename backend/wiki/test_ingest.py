@@ -218,6 +218,8 @@ class IngestTests(unittest.TestCase):
         client = cmd.index('/app/opencode', cmd.index('--chdir'))
         self.assertEqual(cmd[client:client+2],['/app/opencode','run'])
         self.assertTrue(cmd[client+2].startswith('Follow the attached system prompt'))
+        self.assertNotIn('--variant', cmd)
+
         self.assertLess(client+2,cmd.index('--file'))
         self.assertIn('--agent',cmd); self.assertIn('plan',cmd)
         file_args=[cmd[i+1] for i,x in enumerate(cmd[:-1]) if x=='--file']
@@ -226,6 +228,17 @@ class IngestTests(unittest.TestCase):
         self.assertTrue(all(str(p).startswith('/work/') for p in file_args))
         self.assertIn('--clearenv',cmd); self.assertIn('--unshare-pid',cmd)
         self.assertNotIn('--auto',cmd)
+
+    def test_longcat_effort_is_forwarded_to_cli(self):
+        from backend.wiki.cli_isolation import opencode_command
+        for effort in ('low','medium'):
+            cmd=opencode_command(self.root,'opencode/longcat-2.5-preview-free','plan',effort)
+            self.assertEqual(cmd[cmd.index('--variant')+1],effort)
+
+    def test_longcat_rejects_unknown_effort(self):
+        from backend.wiki.cli_isolation import opencode_command
+        with self.assertRaises(ValueError):
+            opencode_command(self.root,'opencode/longcat-2.5-preview-free','plan','invalid')
 
     def test_quota_fallback_uses_both_actual_windows_and_strict_ten_percent_reserve(self):
         with patch('backend.wiki.ingest_runner.read_codex_limits',return_value={'primary_used_percent':90,'secondary_used_percent':20}):
