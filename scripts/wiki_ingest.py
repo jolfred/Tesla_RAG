@@ -19,7 +19,8 @@ from backend.wiki.legacy_progress import reconcile_legacy  # noqa: E402
 DEFAULT_EXTRACT = "opencode/longcat-2.5-preview-free"
 DEFAULT_MERGE = DEFAULT_EXTRACT
 FREE_FALLBACKS = ["opencode/mimo-v2.6-flash-free", "opencode/nemotron-3-ultra-free"]
-FREE_MODEL_CHOICES = (DEFAULT_EXTRACT, *FREE_FALLBACKS)
+FREE_MODEL_CHOICES = (DEFAULT_EXTRACT, *FREE_FALLBACKS,
+                      "opencode/muse-spark-1.3-contributor-free", "opencode/ling-3.1-flash-free")
 
 
 def status(db: Path, run_dir: Path, with_limits: bool = False) -> dict:

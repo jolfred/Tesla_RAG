@@ -18,6 +18,12 @@ def opencode_command(work: Path, model: str, agent: str, effort: str = "low") ->
         (state / folder).mkdir(parents=True, exist_ok=True)
     home = os.environ.get("HOME", "/home/jolf")
     config: dict = {"$schema":"https://opencode.ai/config.json"}
+    # MiMo and LongCat document a thinking switch, not a hard Low budget.
+    # Use nonthinking mode for extraction and validated text-patch drafts.
+    if effort in {"low", "medium"} and model in {"opencode/mimo-v2.6-flash-free", "opencode/longcat-2.5-preview-free"}:
+        config["provider"] = {"opencode": {"models": {
+            model.split("/", 1)[1]: {"options": {"thinking": {"type": "disabled"}}}
+        }}}
     memory = root / ".opencode/bin/codebase-memory-mcp"
     if memory.is_file():
         config["mcp"] = {"codebase-memory-mcp": {
@@ -46,7 +52,7 @@ def opencode_command(work: Path, model: str, agent: str, effort: str = "low") ->
                 "--file","/work/stage-instructions.md", "--file","/work/input-bundle.json"])
     # The current official catalog exposes Low/Medium variants for LongCat.
     # MiMo and Nemotron expose no variants: do not pretend they honor effort.
-    if model == "opencode/longcat-2.5-preview-free":
+    if model in {"opencode/longcat-2.5-preview-free", "opencode/muse-spark-1.3-contributor-free", "opencode/ling-3.1-flash-free"}:
         if effort not in {"low", "medium", "high"}:
             raise ValueError("unsupported LongCat reasoning effort")
         cmd.extend(["--variant", effort])

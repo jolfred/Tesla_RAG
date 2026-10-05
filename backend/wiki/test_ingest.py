@@ -234,6 +234,8 @@ class IngestTests(unittest.TestCase):
         for effort in ('low','medium'):
             cmd=opencode_command(self.root,'opencode/longcat-2.5-preview-free','plan',effort)
             self.assertEqual(cmd[cmd.index('--variant')+1],effort)
+            config=json.loads((self.root/'opencode.json').read_text())
+            self.assertEqual(config['provider']['opencode']['models']['longcat-2.5-preview-free']['options']['thinking']['type'],'disabled')
 
     def test_longcat_rejects_unknown_effort(self):
         from backend.wiki.cli_isolation import opencode_command

@@ -23,6 +23,8 @@ FREE_MODELS = {
     "opencode/mimo-v2.6-flash-free",
     "opencode/nemotron-3-ultra-free",
     "opencode/longcat-2.5-preview-free",
+    "opencode/muse-spark-1.3-contributor-free",
+    "opencode/ling-3.1-flash-free",
 }
 
 
