@@ -1,6 +1,14 @@
 # AGENTS.md
 
-GraphRAG-сервис для Штаба СО КГЭУ «Тесла». Ответы идут wiki-first (`storage/wiki/*.md` через `backend/wiki/loop.py` + GigaChat); legacy-путь: VK-посты → граф (Neo4j) + векторный индекс (Qdrant) → Louvain-сообщества. Индексация работает только с серверами Docker (`docker compose up -d qdrant neo4j`); Python-venv в `.venv`.
+LLM Wiki для Штаба СО КГЭУ «Тесла». Ответы идут исключительно через `backend/wiki/service.py` и `backend/wiki/loop.py`, по `storage/wiki/*.md`. При отсутствии фактов — «В архивах нет данных.», при ошибке поставщика — HTTP 503. RAG и GraphRAG не являются fallback. Python-venv в `.venv`.
+
+## Действующие указания Альфреда (04–05.10.2026)
+
+- Старые команды Neo4j/Qdrant и описание графовой архитектуры ниже оставлены как справка об архивном коде. Не запускать их для ingest или ответов Wiki.
+- К Кириллу больше не подключаться и не синхронизировать; новый сервер будет арендован после готовности вики. Это отменяет старое требование синка ниже.
+- Код публикуется через SSH `upstream`; контент `storage/wiki/` остаётся вне Git.
+- Компиляция: сначала бесплатный OpenCode CLI; при его недоступности — Codex CLI с GPT-6 Luna Low для извлечения и Medium для обновления статьи. Sol Medium решает сложные противоречия. Перед каждым вызовом Codex проверять настоящую квоту обоих окон; при остатке 10% или меньше новые вызовы не выполнять. Не угадывать квоту по токенам.
+- На merge передавать 1–5 релевантных Wiki-файлов; не читать всю вики каждый раз. Использовать английские промпты с обоими файлами канона дословно.
 
 ## GitHub (обязательно)
 
@@ -9,10 +17,11 @@ GraphRAG-сервис для Штаба СО КГЭУ «Тесла». Ответ
 - Рабочий цикл (строго): изменение → коммит → `git push` в `upstream` СРАЗУ, без накопления. Пользователь проверяет всё через GitHub. Непушеных изменений к концу сессии не оставлять.
 - Активная ветка лендинга — `gid-web`. Перед пушем: `git status`, `git diff --stat`; секреты (`.env`) не коммитить.
 - `storage/` в `.gitignore` — в гит идут только код и конфиги. Контент вики (`storage/wiki/`) в гит НЕ пушится, а синкается к Кириллу (см. «Синк к Кириллу»).
+- Канон вики: `schema/rules.md` (дословно, не править) + `schema/rules_mapping.md` (единственное место трактовок). Промпты Ingest/Query обязаны включать оба дословно.
 
 ## SSH-ключи (где лежат)
 
-- GitHub-пуш (`upstream`): `~/.ssh/id_ed25519` (коммент `opencode-wsl`), публичный ключ прописан в аккаунте jolfred. `ssh -T git@github.com` → `Hi jolfred!`.
+- GitHub-пуш (`upstream`): `~/.ssh/id_ed25519` (коммент `jolf-github-opencode-2026-10-05`, создан на Джоле), публичный ключ прописан в аккаунте jolfred. `ssh -T git@github.com` → `Hi jolfred!`.
 - ВМ Кирилла: ключ Кирилла (коммент `kirill.lytkin.2003@mail.ru`); здесь — `~/.ssh/vm_jolfred` (`chmod 600`), у пользователя — `C:\Users\Alfred\.ssh\jolfred(.pub)`. Ключ каждый раз даёт пользователь; в чат повторно не вставлять, в репозиторий не класть.
 - Первое подключение к новому хосту: `StrictHostKeyChecking=accept-new` один раз, дальше fingerprint уже в `~/.ssh/known_hosts`.
 
@@ -144,3 +153,16 @@ docker run --rm -v $PWD/frontend:/app -v graphrag_npm_cache:/root/.npm -w /app n
 - Тесты: `conftest.py` гасит Langfuse (`LANGFUSE_ENABLED=0`), иначе `.env` полезет в живой сервер.
 - Рестарт API: `scripts/restart_api.sh` (PID-файл; `pkill -f` убивает собственный шелл).
 - Cost: только из env (`GIGACHAT_RUB_PER_1K_IN/_OUT`, `PROXYAPI_USD_PER_1K_IN/_OUT`); не заданы — только токены.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+When the user types `/graphify`, use the installed graphify skill or instructions before doing anything else.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- Dirty graphify-out/ files are expected after hooks or incremental updates; dirty graph files are not a reason to skip graphify. Only skip graphify if the task is about stale or incorrect graph output, or the user explicitly says not to use it.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).

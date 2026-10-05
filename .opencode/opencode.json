@@ -1,0 +1,20 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    ".opencode/plugins/graphify.js"
+  ],
+  "mcp": {
+    "codebase-memory-mcp": {
+      "type": "local",
+      "command": [
+        "/home/jolf/Tesla_RAG/.opencode/bin/codebase-memory-mcp",
+        "--tool-profile=analysis"
+      ],
+      "env": {
+        "CBM_CACHE_DIR": "/home/jolf/Tesla_RAG/.opencode/cache",
+        "CBM_RUNTIME_DIR": "/home/jolf/Tesla_RAG/.opencode/cache/runtime"
+      },
+      "enabled": true
+    }
+  }
+}

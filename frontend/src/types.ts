@@ -92,6 +92,18 @@ export interface WikiPageData {
   markdown: string
   links: string[]
   sources: string[]
+  source_details?: WikiSource[]
+}
+
+/** Optional source details returned by the wiki API to make citations readable. */
+export interface WikiSource {
+  url: string
+  title?: string | null
+  topic?: string | null
+  group?: string | null
+  group_name?: string | null
+  published_at?: string | null
+  event_date?: string | null
 }
 
 export interface WikiSearchItem {

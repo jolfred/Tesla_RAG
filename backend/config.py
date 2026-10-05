@@ -55,6 +55,7 @@ GEMMA_RPM = int(os.getenv("GEMMA_RPM", "30"))
 
 # GigaChat (Сбер, OpenAI-совместимый)
 GIGACHAT_AUTH_KEY = os.getenv("GIGACHAT_AUTH_KEY", "")
+GIGACHAT_AUTH_KEY_2 = os.getenv("GIGACHAT_AUTH_KEY_2", "")
 GIGACHAT_MODEL = os.getenv("GIGACHAT_MODEL", "GigaChat-2-Pro")
 
 # API Keys

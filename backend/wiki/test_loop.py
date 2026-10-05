@@ -33,15 +33,16 @@ def test_read_ok_and_traversal_blocked():
 
 
 def test_loop_happy_path():
+    url = loop.wiki_read("lso/spo_yunost")["sources"][0]
     c = FakeClient(
         [
             _fc("wiki_search", {"query": "Юность командир", "top_k": 5}),
             _fc("wiki_read", {"slug": "lso/spo_yunost"}),
-            {"message": {"content": "Командир — Шарифуллин (см. https://vk.com/x)"}, "finish_reason": "stop"},
+            {"message": {"content": f"Сведения об отряде: [источник]({url})"}, "finish_reason": "stop"},
         ]
     )
     r = loop.try_wiki_answer("Кто командовал Юностью?", client=c)
-    assert r and "Шарифуллин" in r["answer"]
+    assert r and url in r["answer"]
     assert r["pages"] == ["lso/spo_yunost"] and r["sources"]
     assert c.calls == 3
 

@@ -1,0 +1,47 @@
+"""Run the official OpenCode client with only approved compilation inputs mounted."""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+from pathlib import Path
+
+
+def opencode_command(work: Path, model: str, agent: str) -> list[str]:
+    sandbox = shutil.which("bwrap")
+    client = shutil.which("opencode")
+    if not sandbox or not client:
+        raise RuntimeError("isolated OpenCode compilation requires bubblewrap and OpenCode CLI")
+    root = Path(__file__).resolve().parents[2]
+    state = root / ".opencode/cache/compiler-cli"
+    for folder in ("home", "config", "cache", "data", "mcp", "mcp/runtime"):
+        (state / folder).mkdir(parents=True, exist_ok=True)
+    home = os.environ.get("HOME", "/home/jolf")
+    config: dict = {"$schema":"https://opencode.ai/config.json"}
+    memory = root / ".opencode/bin/codebase-memory-mcp"
+    if memory.is_file():
+        config["mcp"] = {"codebase-memory-mcp": {
+            "type":"local", "command":["/app/codebase-memory-mcp", "--tool-profile=analysis"],
+            "env":{"CBM_CACHE_DIR":"/state/mcp", "CBM_RUNTIME_DIR":"/state/mcp/runtime"},
+            "enabled":True,
+        }}
+    (work / "opencode.json").write_text(json.dumps(config), encoding="utf-8")
+    cmd = [sandbox, "--die-with-parent", "--unshare-pid", "--clearenv"]
+    for path in ("/usr", "/bin", "/lib", "/lib64", "/etc/resolv.conf", "/etc/ssl/certs"):
+        if Path(path).exists():
+            cmd.extend(["--ro-bind", path, path])
+    cmd.extend(["--proc","/proc", "--dev","/dev", "--dir","/app",
+                "--ro-bind",client,"/app/opencode", "--bind",str(state),"/state",
+                "--bind",str(state / "home"),home, "--bind",str(work),"/work", "--dir","/tmp"])
+    if memory.is_file():
+        cmd.extend(["--ro-bind",str(memory),"/app/codebase-memory-mcp"])
+    environment = {"HOME":home, "PATH":"/app:/usr/bin:/bin", "XDG_CONFIG_HOME":"/state/config",
+                   "XDG_CACHE_HOME":"/state/cache", "XDG_DATA_HOME":"/state/data",
+                   "OPENCODE_CONFIG":"/work/opencode.json"}
+    for key, value in environment.items():
+        cmd.extend(["--setenv",key,value])
+    cmd.extend(["--chdir","/work", "/app/opencode","run",
+                "Follow the attached system prompt and return only its requested JSON object. Use the attached input bundle as the complete context. No tools are needed.",
+                "--format","json", "--agent",agent, "--model",model, "--dir","/work",
+                "--file","/work/stage-instructions.md", "--file","/work/input-bundle.json"])
+    return cmd

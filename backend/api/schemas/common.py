@@ -3,6 +3,8 @@ from pydantic import BaseModel
 
 class StatusResponse(BaseModel):
     status: str
+    mode: str = "wiki"
+    wiki_pages: int = 0
     qdrant_points: int = 0
     neo4j_nodes: int = 0
     neo4j_relations: int = 0

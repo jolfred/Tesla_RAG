@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 
 import { api } from '../api/client'
 import type { WikiNode } from '../types'
-import { categoryOf } from './wikilinks'
+import { categoryName, categoryOf } from './wikilinks'
 
 /** Каталог Летописи: /wiki. Строки — настоящие ссылки на страницы статей. */
 export default function WikiCatalog(): React.JSX.Element {
@@ -85,7 +85,7 @@ export default function WikiCatalog(): React.JSX.Element {
                   color: cat === k ? '#6D28D9' : '#6F6459',
                 }}
               >
-                {k === 'all' ? 'Все' : k} · {n}
+                {k === 'all' ? 'Все' : categoryName(k)} · {n}
               </button>
             ))}
           </div>
@@ -98,7 +98,7 @@ export default function WikiCatalog(): React.JSX.Element {
                   style={{ display: 'flex', alignItems: 'baseline', gap: 12, padding: '14px 20px', textDecoration: 'none' }}
                 >
                   <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#6D28D9', whiteSpace: 'nowrap' }}>
-                    {categoryOf(p.kind)}
+                    {categoryName(p.kind)}
                   </span>
                   <span style={{ fontSize: 16, fontWeight: 600, color: '#211B16' }}>{p.title}</span>
                   <span style={{ marginLeft: 'auto', color: '#ABA094', fontSize: 13, fontFamily: 'JetBrains Mono, ui-monospace, monospace' }}>{p.slug}</span>

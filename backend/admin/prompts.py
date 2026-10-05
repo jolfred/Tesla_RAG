@@ -10,19 +10,15 @@ from __future__ import annotations
 from backend.admin.db import ADMIN_DB, get_connection
 
 KEYS = (
-    "answer_base",
-    "answer_narrative",
-    "answer_global_extra",
-    "plan_prompt",
-    "extract_system",
+    "wiki_query",
+    "wiki_extract",
+    "wiki_merge",
 )
 
 TITLES = {
-    "answer_base": "Ответ — базовый системный промпт",
-    "answer_narrative": "Ответ — нарратив для enumerable-блоков",
-    "answer_global_extra": "Ответ — добавка для global-режима",
-    "plan_prompt": "План — классификатор интента и слотов",
-    "extract_system": "Индексация — извлечение графа из поста",
+    "wiki_query": "Ответ по Летописи",
+    "wiki_extract": "Извлечение фактов из источников",
+    "wiki_merge": "Обновление статьи Летописи",
 }
 
 _defaults: dict[str, str] | None = None
@@ -32,20 +28,10 @@ def defaults() -> dict[str, str]:
     """Дефолты = текущие константы кода (ленивый импорт, без циклов)."""
     global _defaults
     if _defaults is None:
-        from backend.indexer.prompts import SYSTEM_PROMPT
-        from backend.rag.answer_generator import (
-            BASE_PROMPT,
-            GLOBAL_EXTRAS,
-            NARRATIVE_PROMPT,
-        )
-        from backend.rag.query_planner import PLAN_PROMPT
-
+        from backend.wiki.prompts import SCHEMA_DIR
         _defaults = {
-            "answer_base": BASE_PROMPT,
-            "answer_narrative": NARRATIVE_PROMPT,
-            "answer_global_extra": GLOBAL_EXTRAS,
-            "plan_prompt": PLAN_PROMPT,
-            "extract_system": SYSTEM_PROMPT,
+            key: (SCHEMA_DIR / "prompts" / filename).read_text(encoding="utf-8")
+            for key, filename in {"wiki_query": "wiki_query.md", "wiki_extract": "wiki_extract_en.md", "wiki_merge": "wiki_merge_en.md"}.items()
         }
     return _defaults
 

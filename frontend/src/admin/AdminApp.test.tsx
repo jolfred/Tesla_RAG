@@ -24,7 +24,7 @@ describe('AdminApp каркас', () => {
     localStorage.clear()
   })
 
-  it('8 табов в конфиге', () => {
+  it('8 табов в конфиге, граф показывает Wiki', () => {
     expect(ADMIN_TABS.map((t) => t.id)).toEqual([
       'docs',
       'groups',
@@ -32,7 +32,7 @@ describe('AdminApp каркас', () => {
       'projects',
       'chat',
       'prompts',
-      'graphs',
+      'wiki-graph',
       'keys',
     ])
   })

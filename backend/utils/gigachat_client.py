@@ -6,7 +6,7 @@ import uuid
 import httpx
 from openai import OpenAI
 
-from backend.config import GIGACHAT_AUTH_KEY, GIGACHAT_MODEL
+from backend.config import GIGACHAT_AUTH_KEY, GIGACHAT_AUTH_KEY_2, GIGACHAT_MODEL
 from backend.utils.logger import setup_logger
 
 logger = setup_logger("gigachat_client")
@@ -63,9 +63,12 @@ _DEFAULT_SCHEMA = {
 
 
 class GigaChatClient:
-    def __init__(self, base_url: str = _API_BASE, model: str | None = None):
+    def __init__(
+        self, base_url: str = _API_BASE, model: str | None = None, auth_key: str | None = None
+    ):
         self._base_url = base_url
         self._model = model or GIGACHAT_MODEL
+        self._auth_key = auth_key  # если None — берётся из секретов/env
         self._token = None
         self._token_expires_at = 0.0
         self._client = None
@@ -75,7 +78,7 @@ class GigaChatClient:
     def _fetch_token(self) -> str:
         from backend.admin.secrets import get_secret
 
-        auth_key = get_secret("GIGACHAT_AUTH_KEY", GIGACHAT_AUTH_KEY)
+        auth_key = self._auth_key or get_secret("GIGACHAT_AUTH_KEY", GIGACHAT_AUTH_KEY)
         if not auth_key:
             raise RuntimeError("GIGACHAT_AUTH_KEY is not set")
 

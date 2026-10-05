@@ -22,3 +22,10 @@ frontend/coverage/
 .idea/
 .vscode/
 .DS_Store
+
+# Project-local MCP binaries and generated code indexes
+.opencode/bin/
+.opencode/cache/
+.opencode/node_modules/
+.cbm/
+graphify-out/

@@ -30,10 +30,10 @@ export function Markdown({ text, tone }: { text: string; tone: 'light' | 'dark' 
       components={{
         a({ href, children }) {
           if (href?.startsWith('#ref-')) {
-            const n = href.slice('#ref-'.length)
+            const marker = href.slice('#ref-'.length)
             return (
-              <a id={`fnref-${n}`} href={href} style={{ color: accent, fontSize: '0.78em', fontWeight: 800, verticalAlign: 'super', textDecoration: 'none' }}>
-                [{children}]
+              <a id={`fnref-${marker}`} href={href} style={{ color: accent, fontSize: '0.78em', fontWeight: 800, verticalAlign: 'super', textDecoration: 'none' }}>
+                [{String(children)}]
               </a>
             )
           }
@@ -63,7 +63,7 @@ export function Markdown({ text, tone }: { text: string; tone: 'light' | 'dark' 
           )
         },
         h3({ children }) {
-          return <h3 style={{ fontSize: 19, margin: '24px 0 8px', lineHeight: 1.3, color: head }}>{children}</h3>
+          return <h3 id={tone === 'light' ? slugifyHeading(childText(children)) : undefined} style={{ fontSize: 19, margin: '24px 0 8px', lineHeight: 1.3, color: head }}>{children}</h3>
         },
         p({ children }) {
           return <p style={{ fontSize: tone === 'light' ? 16 : 15, lineHeight: 1.75, color: ink, margin: '10px 0', overflowWrap: 'break-word' }}>{children}</p>

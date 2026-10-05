@@ -104,20 +104,6 @@ export const adminApi = {
       `/api/v1/admin/projects/${encodeURIComponent(slug)}/items?item_type=${encodeURIComponent(item_type)}&item_id=${encodeURIComponent(item_id)}`,
       { method: 'DELETE' },
     ),
-  indexProject: (slug: string, body: { model: string; extractor: string; min_date: string; force: boolean }) =>
-    req<{ job_id: string; status: string }>(`/api/v1/admin/projects/${encodeURIComponent(slug)}/index`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-  projectStats: (slug: string) =>
-    req<{
-      source_model: string
-      collection: string
-      neo4j_nodes: number
-      neo4j_relations: number
-      qdrant_points: number
-      error: string
-    }>(`/api/v1/admin/projects/${encodeURIComponent(slug)}/stats`),
   documents: () => req<{ documents: AdminDocument[] }>('/api/v1/admin/documents'),
   uploadDocument: async (file: File, title: string): Promise<{ doc_id: string; title: string }> => {
     const fd = new FormData()
@@ -184,13 +170,11 @@ export const adminApi = {
     req<{ ok: boolean; text: string }>(`/api/v1/admin/prompts/${encodeURIComponent(key)}/reset`, {
       method: 'POST',
     }),
-  graphExport: (project_slug: string) =>
+  graphExport: () =>
     req<{
-      source_model: string
-      browser_url: string
-      nodes: { id: string; label: string; name: string }[]
-      edges: { a: string; rel: string; b: string }[]
-    }>(`/api/v1/admin/graph/export?project_slug=${encodeURIComponent(project_slug)}`),
+      nodes: { slug: string; title: string; kind: string }[]
+      edges: { source: string; target: string }[]
+    }>('/api/v1/admin/graph/export'),
   settings: () =>
     req<{
       settings: { key: string; title: string; in_db: boolean; in_env: boolean }[]

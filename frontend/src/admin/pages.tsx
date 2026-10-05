@@ -195,17 +195,11 @@ export function DocsTab(): React.JSX.Element {
 export function ProjectsTab(): React.JSX.Element {
   const [list, setList] = useState<{ slug: string; name: string; description: string }[]>([])
   const [detail, setDetail] = useState<AdminProjectDetail | null>(null)
-  const [stats, setStats] = useState<Record<string, { n: number; r: number; q: number; err: string }>>({})
-  const [idxModel, setIdxModel] = useState('gigachat')
-  const [idxExtractor, setIdxExtractor] = useState('transformer')
-  const [idxMinDate, setIdxMinDate] = useState('')
-  const [idxForce, setIdxForce] = useState(false)
   const [name, setName] = useState('')
   const [slugManual, setSlugManual] = useState('')
   const [slugEdit, setSlugEdit] = useState(false)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
-  const [notice, setNotice] = useState('')
   const slug = slugManual || slugify(name)
 
   const reload = useCallback(async (keepSlug?: string) => {
@@ -260,29 +254,7 @@ export function ProjectsTab(): React.JSX.Element {
   const openDetail = async (s: string): Promise<void> => {
     setErr('')
     try {
-      const [d, st] = await Promise.all([adminApi.projectDetail(s), adminApi.projectStats(s)])
-      setDetail(d)
-      setStats((prev) => ({
-        ...prev,
-        [s]: { n: st.neo4j_nodes, r: st.neo4j_relations, q: st.qdrant_points, err: st.error },
-      }))
-    } catch (e) {
-      setErr(errText(e))
-    }
-  }
-
-  const index = async (): Promise<void> => {
-    if (!detail) return
-    setErr('')
-    setNotice('')
-    try {
-      await adminApi.indexProject(detail.slug, {
-        model: idxModel,
-        extractor: idxExtractor,
-        min_date: idxMinDate,
-        force: idxForce,
-      })
-      setNotice('Добавлено в очередь — запуск на вкладке «Очередь».')
+      setDetail(await adminApi.projectDetail(s))
     } catch (e) {
       setErr(errText(e))
     }
@@ -292,6 +264,9 @@ export function ProjectsTab(): React.JSX.Element {
     <div>
       <div className="ta-card">
         <h3 style={{ margin: '0 0 8px' }}>Новый проект</h3>
+        <p className="ta-muted" style={{ marginTop: 0 }}>
+          Проекты помогают группировать собранные материалы. Ответы чата сейчас строятся по Летописи; отдельная индексация проекта отключена.
+        </p>
         <div className="ta-row">
           <input
             className="ta-input"
@@ -306,7 +281,7 @@ export function ProjectsTab(): React.JSX.Element {
           </button>
         </div>
         <p className="ta-muted" style={{ marginBottom: 0 }}>
-          ID для графа и коллекций: <code>{slug || '—'}</code>
+          Внутренний ID проекта: <code>{slug || '—'}</code>
           {slugEdit ? (
             <>
               {' '}
@@ -359,43 +334,6 @@ export function ProjectsTab(): React.JSX.Element {
       {detail && (
         <div className="ta-card">
           <h3 style={{ margin: '0 0 8px' }}>Состав: {detail.name}</h3>
-          {stats[detail.slug] && (
-            <p className="ta-muted" style={{ marginTop: 0 }}>
-              Граф: {stats[detail.slug].n} узлов, {stats[detail.slug].r} связей · Qdrant:{' '}
-              {stats[detail.slug].q} точек
-              {stats[detail.slug].err ? ` · ⚠ ${stats[detail.slug].err}` : ''}
-            </p>
-          )}
-          <div className="ta-row" style={{ marginBottom: 12 }}>
-            <select className="ta-select" value={idxModel} onChange={(e) => setIdxModel(e.target.value)}>
-              <option value="gigachat">gigachat</option>
-              <option value="gemma">gemma</option>
-              <option value="proxyapi">proxyapi</option>
-            </select>
-            <select
-              className="ta-select"
-              value={idxExtractor}
-              onChange={(e) => setIdxExtractor(e.target.value)}
-            >
-              <option value="transformer">transformer (v2)</option>
-              <option value="legacy">legacy</option>
-            </select>
-            <input
-              className="ta-input"
-              value={idxMinDate}
-              onChange={(e) => setIdxMinDate(e.target.value)}
-              placeholder="min-date (пусто = все)"
-              style={{ width: 170 }}
-            />
-            <label style={{ fontSize: 14 }}>
-              <input type="checkbox" checked={idxForce} onChange={(e) => setIdxForce(e.target.checked)} />{' '}
-              force
-            </label>
-            <button className="ta-btn" onClick={() => void index()} title="Положить индексацию этого проекта в очередь (запуск — на вкладке «Очередь»)">
-              В очередь на индексацию
-            </button>
-          </div>
-          {notice && <p style={{ color: '#067647', fontSize: 14 }}>{notice}</p>}
           {detail.items.length === 0 ? (
             <p className="ta-muted">Пусто. Привяжите документы на вкладке «Документы», группы — на вкладке «VK-группы».</p>
           ) : (
@@ -454,9 +392,6 @@ function paramsSummary(j: AdminJob): string {
     return `${String(p.domain ?? '?')}${lim > 0 ? `, лимит ${lim}` : ', все посты'}`
   }
   if (j.kind === 'scrape_meta') return String(p.domain ?? '?')
-  if (j.kind === 'index') {
-    return `${String(p.slug ?? j.project_slug)} [${String(p.model ?? '?')}/${String(p.extractor ?? '?')}]${p.min_date ? ` от ${String(p.min_date)}` : ''}${p.force ? ' +force' : ''}`
-  }
   return ''
 }
 
@@ -472,7 +407,7 @@ export function QueueTab(): React.JSX.Element {
 
   const reload = useCallback(async () => {
     try {
-      setJobs((await adminApi.jobs()).jobs)
+      setJobs((await adminApi.jobs()).jobs.filter((job) => job.kind !== 'index'))
     } catch (e) {
       setErr(errText(e))
     }
@@ -539,10 +474,6 @@ export function QueueTab(): React.JSX.Element {
     const p = j.params ?? {}
     setEditParams({
       limit: String(p.limit ?? 0),
-      model: String(p.model ?? 'gigachat'),
-      extractor: String(p.extractor ?? 'transformer'),
-      min_date: String(p.min_date ?? ''),
-      force: (p.force ? '1' : ''),
     })
   }
 
@@ -550,16 +481,7 @@ export function QueueTab(): React.JSX.Element {
     if (!editing) return
     setErr('')
     try {
-      const params: Record<string, unknown> =
-        editing.kind === 'index'
-          ? {
-              slug: editing.project_slug || editing.params?.slug,
-              model: editParams.model,
-              extractor: editParams.extractor,
-              min_date: editParams.min_date,
-              force: editParams.force === '1',
-            }
-          : { domain: editing.params?.domain, limit: Math.max(0, parseInt(editParams.limit || '0', 10) || 0) }
+      const params: Record<string, unknown> = { domain: editing.params?.domain, limit: Math.max(0, parseInt(editParams.limit || '0', 10) || 0) }
       await adminApi.updateJob(editing.id, { label: editLabel, params })
       setEditing(null)
       await reload()
@@ -573,7 +495,7 @@ export function QueueTab(): React.JSX.Element {
       <div className="ta-card">
         <div className="ta-row" style={{ justifyContent: 'space-between' }}>
           <p className="ta-muted" style={{ margin: 0 }}>
-            Сюда попадают кнопки «в очередь» из вкладок групп и проектов. Проверьте что и куда —
+            Сюда попадают задачи сбора материалов из вкладки групп. Проверьте что и куда —
             потом «Запустить». Одновременно выполняется одна задача.
           </p>
           <div className="ta-row">
@@ -679,36 +601,7 @@ export function QueueTab(): React.JSX.Element {
               title="Название видно только в этом списке"
             />
           </div>
-          {editing.kind === 'index' ? (
-            <div className="ta-row">
-              <select className="ta-select" value={editParams.model} onChange={(e) => setEditParams((v) => ({ ...v, model: e.target.value }))}>
-                <option value="gigachat">gigachat</option>
-                <option value="gemma">gemma</option>
-                <option value="proxyapi">proxyapi</option>
-              </select>
-              <select className="ta-select" value={editParams.extractor} onChange={(e) => setEditParams((v) => ({ ...v, extractor: e.target.value }))}>
-                <option value="transformer">transformer (v2)</option>
-                <option value="legacy">legacy</option>
-              </select>
-              <input
-                className="ta-input"
-                style={{ width: 150 }}
-                value={editParams.min_date}
-                onChange={(e) => setEditParams((v) => ({ ...v, min_date: e.target.value }))}
-                placeholder="min-date"
-                title="Посты старше этой даты пропускаются. Пусто = все."
-              />
-              <label style={{ fontSize: 14 }} title="Обработать все посты заново, даже уже проиндексированные">
-                <input
-                  type="checkbox"
-                  checked={editParams.force === '1'}
-                  onChange={(e) => setEditParams((v) => ({ ...v, force: e.target.checked ? '1' : '' }))}
-                />{' '}
-                force
-              </label>
-            </div>
-          ) : (
-            <div className="ta-row">
+          <div className="ta-row">
               <input
                 className="ta-input"
                 style={{ width: 170 }}
@@ -719,8 +612,7 @@ export function QueueTab(): React.JSX.Element {
                 title="Сколько свежих постов скачать. 0 = все доступные."
               />
               <span className="ta-muted">лимит постов (0 = все)</span>
-            </div>
-          )}
+          </div>
           <div className="ta-row" style={{ marginTop: 8 }}>
             <button className="ta-btn" onClick={() => void saveEdit()}>
               Сохранить
@@ -890,7 +782,7 @@ export function GroupsTab(): React.JSX.Element {
                       <button
                         className="ta-btn secondary"
                         onClick={() => void queue(g.domain, 'posts')}
-                        title="Скачать посты группы в storage/posts/posts_<домен>.jsonl (потом — в очередь на индексацию)"
+                        title="Собрать посты группы для последующей проверки и компиляции в Летопись"
                       >
                         Посты в очередь
                       </button>
@@ -925,19 +817,10 @@ interface ChatResult {
 }
 
 export function ChatTab(): React.JSX.Element {
-  const [projects, setProjects] = useState<string[]>([])
-  const [slug, setSlug] = useState('')
   const [question, setQuestion] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [res, setRes] = useState<ChatResult | null>(null)
-
-  useEffect(() => {
-    adminApi
-      .projects()
-      .then((p) => setProjects(p.projects.map((x) => x.slug)))
-      .catch((e: unknown) => setErr(errText(e)))
-  }, [])
 
   const ask = async (): Promise<void> => {
     if (!question.trim()) return
@@ -945,7 +828,7 @@ export function ChatTab(): React.JSX.Element {
     setErr('')
     setRes(null)
     try {
-      setRes(await adminApi.adminChat(question.trim(), slug))
+      setRes(await adminApi.adminChat(question.trim(), ''))
     } catch (e) {
       setErr(errText(e))
     } finally {
@@ -957,14 +840,6 @@ export function ChatTab(): React.JSX.Element {
     <div>
       <div className="ta-card">
         <div className="ta-row">
-          <select className="ta-select" value={slug} onChange={(e) => setSlug(e.target.value)}>
-            <option value="">Общий граф (без проекта)</option>
-            {projects.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
           <input
             className="ta-input"
             style={{ flex: 1, minWidth: 240 }}
@@ -979,6 +854,7 @@ export function ChatTab(): React.JSX.Element {
             Спросить
           </button>
         </div>
+        <p className="ta-muted" style={{ marginBottom: 0 }}>Ответ проверяется по Летописи целиком. Проекты пока не подключены как отдельные источники.</p>
         {err && <p className="ta-error">{err}</p>}
       </div>
 
@@ -1147,184 +1023,6 @@ export function PromptsTab(): React.JSX.Element {
           </div>
           {err && <p className="ta-error">{err}</p>}
           {saved && <p style={{ color: '#067647', fontSize: 14 }}>{saved}</p>}
-        </div>
-      )}
-    </div>
-  )
-}
-
-interface GraphData {
-  source_model: string
-  browser_url: string
-  nodes: { id: string; label: string; name: string }[]
-  edges: { a: string; rel: string; b: string }[]
-}
-
-const LABEL_COLORS: Record<string, string> = {
-  Person: '#2563eb',
-  Squad: '#16a34a',
-  Organization: '#16a34a',
-  Entity: '#6b7280',
-  Event: '#dc2626',
-  Project: '#9333ea',
-  Role: '#ea580c',
-  Award: '#ca8a04',
-  Location: '#0891b2',
-  Profession: '#4d7c0f',
-}
-
-export function GraphsTab(): React.JSX.Element {
-  const [projects, setProjects] = useState<string[]>([])
-  const [slug, setSlug] = useState(
-    () => new URLSearchParams(window.location.search).get('project') ?? '',
-  )
-  const [data, setData] = useState<GraphData | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [err, setErr] = useState('')
-
-  useEffect(() => {
-    adminApi
-      .projects()
-      .then((p) => setProjects(p.projects.map((x) => x.slug)))
-      .catch((e: unknown) => setErr(errText(e)))
-  }, [])
-
-  const load = useCallback(async (s: string) => {
-    setLoading(true)
-    setErr('')
-    setData(null)
-    try {
-      setData(await adminApi.graphExport(s))
-    } catch (e) {
-      setErr(errText(e))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    const url = new URL(window.location.href)
-    if (slug) {
-      url.searchParams.set('project', slug)
-    } else {
-      url.searchParams.delete('project')
-    }
-    window.history.replaceState(null, '', `/admin/graphs${url.search}`)
-    void load(slug)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug])
-
-  const permalink = `${window.location.origin}/admin/graphs${slug ? `?project=${encodeURIComponent(slug)}` : ''}`
-  // Deep-ссылка в Neo4j Browser: редактор предзаполнен запросом ветки
-  // (?cmd=edit&arg=...), пользователю остаётся нажать Run.
-  // Если админку открыли не с localhost — хост Neo4j берём из адреса страницы.
-  const neo4jQuery = data
-    ? `MATCH (a)-[r]->(b) WHERE a.source_model = '${data.source_model}' AND b.source_model = '${data.source_model}' RETURN a, r, b LIMIT 300`
-    : ''
-  const neo4jBase = (() => {
-    if (!data) return ''
-    try {
-      const u = new URL(data.browser_url)
-      const pageHost = window.location.hostname
-      if ((u.hostname === 'localhost' || u.hostname === '127.0.0.1') && pageHost && pageHost !== 'localhost' && pageHost !== '127.0.0.1') {
-        u.hostname = pageHost
-      }
-      return u.toString().replace(/\/$/, '')
-    } catch {
-      return data.browser_url
-    }
-  })()
-  const neo4jDeep = neo4jBase ? `${neo4jBase}/browser?cmd=edit&arg=${encodeURIComponent(neo4jQuery)}` : ''
-  const nodes = data?.nodes ?? []
-  const R = 220
-  const pos = new Map<string, { x: number; y: number }>()
-  nodes.forEach((n, i) => {
-    const a = (2 * Math.PI * i) / Math.max(nodes.length, 1)
-    pos.set(n.id, { x: 260 + R * Math.cos(a), y: 260 + R * Math.sin(a) })
-  })
-  const ids = new Set(nodes.map((n) => n.id))
-  const drawn = (data?.edges ?? []).filter((e) => ids.has(e.a) && ids.has(e.b)).slice(0, 300)
-
-  return (
-    <div>
-      <div className="ta-card">
-        <div className="ta-row">
-          <select className="ta-select" value={slug} onChange={(e) => setSlug(e.target.value)}>
-            <option value="">Общий граф (llmgraph_gigachat)</option>
-            {projects.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-          {slug && (
-            <button className="ta-btn secondary" onClick={() => void load(slug)} disabled={loading}>
-              Обновить
-            </button>
-          )}
-        </div>
-        {err && <p className="ta-error">{err}</p>}
-        {data && neo4jDeep && (
-          <div className="ta-row" style={{ margin: '12px 0' }}>
-            <a href={neo4jDeep} target="_blank" rel="noreferrer">
-              <button className="ta-btn">Открыть граф в Neo4j</button>
-            </a>
-          </div>
-        )}
-        {data && (
-          <p className="ta-muted" style={{ marginTop: 0 }}>
-            Запрос ветки (уже подставлен в Neo4j по кнопке выше):
-            <br />
-            <code>{neo4jQuery}</code>
-          </p>
-        )}
-        <p className="ta-muted" style={{ marginBottom: 0 }}>
-          Ссылка на эту страницу:{' '}
-          <a href={permalink} target="_blank" rel="noreferrer">
-            {permalink}
-          </a>
-        </p>
-      </div>
-
-      {loading && (
-        <div className="ta-card">
-          <p className="ta-muted">Загрузка графа…</p>
-        </div>
-      )}
-
-      {data && (
-        <div className="ta-card">
-          <h3 style={{ margin: '0 0 8px' }}>
-            {data.source_model}: {nodes.length} узлов, {drawn.length} связей (показаны первые)
-          </h3>
-          {nodes.length > 0 ? (
-            <svg viewBox="0 0 520 520" style={{ width: '100%', maxWidth: 640 }}>
-              {drawn.map((e, i) => {
-                const p1 = pos.get(e.a)
-                const p2 = pos.get(e.b)
-                if (!p1 || !p2) return null
-                return <line key={i} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="#d1d5db" strokeWidth={1} />
-              })}
-              {nodes.map((n) => {
-                const p = pos.get(n.id)
-                if (!p) return null
-                return (
-                  <g key={n.id}>
-                    <circle cx={p.x} cy={p.y} r={9} fill={LABEL_COLORS[n.label] ?? '#6b7280'}>
-                      <title>
-                        {n.name} [{n.label}]
-                      </title>
-                    </circle>
-                    <text x={p.x + 12} y={p.y + 4} fontSize={10} fill="#374151">
-                      {(n.name || n.id).slice(0, 24)}
-                    </text>
-                  </g>
-                )
-              })}
-            </svg>
-          ) : (
-            <p className="ta-muted">В ветке пока пусто — запустите индексацию проекта.</p>
-          )}
         </div>
       )}
     </div>

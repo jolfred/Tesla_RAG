@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from backend.api.auth import verify_admin_session_optional, verify_user_any
 from backend.api.schemas.chat import CallWindow, ChatRequest, ChatResponse, PostPreview, SourceInfo
-from backend.rag.searcher import GraphRAGSearcher
+from backend.wiki.service import WikiAnswerService, WikiUnavailable
 from backend.utils.logger import setup_logger
 
 logger = setup_logger("chat_route")
@@ -13,12 +13,12 @@ _searcher = None
 def _get_searcher():
     global _searcher
     if _searcher is None:
-        _searcher = GraphRAGSearcher()
+        _searcher = WikiAnswerService()
     return _searcher
 
 
 @router.post("/api/v1/chat", response_model=ChatResponse)
-async def chat(
+def chat(
     body: ChatRequest,
     role: str = Depends(verify_user_any),
     admin: dict | None = Depends(verify_admin_session_optional),
@@ -42,6 +42,8 @@ async def chat(
             else None,
             trace_id=result.get("trace_id"),
         )
+    except WikiUnavailable:
+        raise HTTPException(status_code=503, detail="Летопись временно недоступна. Попробуйте позже.")
     except Exception as e:
         logger.error(f"Chat error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")

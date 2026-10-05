@@ -3,15 +3,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from backend.api.auth import verify_user
-from backend.api.routes import admin, auth, chat, communities, documents, status, wiki
+from backend.api.routes import admin, auth, chat, documents, status, wiki
 from backend.config import FRONTEND_DIST
 from backend.utils.logger import setup_logger
 
 logger = setup_logger("api")
 
 app = FastAPI(
-    title="GraphRAG API — Штаб Тесла",
-    description="API сервиса GraphRAG для цифровой платформы Штаба СО КГЭУ «Тесла»",
+    title="Летопись — Штаб Тесла",
+    description="Wiki API цифровой летописи Штаба СО КГЭУ «Тесла»",
     version="1.0.0",
 )
 
@@ -36,7 +36,6 @@ from backend.api.auth import verify_admin, verify_admin_session
 # Админка-сайт (/admin): только Bearer admin-сессия, без X-API-Key.
 app.include_router(admin.router, dependencies=[Depends(verify_admin_session)], tags=["admin"])
 app.include_router(documents.router, dependencies=[Depends(verify_admin)], tags=["documents"])
-app.include_router(communities.router, dependencies=[Depends(verify_admin)], tags=["graph"])
 
 # Frontend: статические ассеты (FR-2.2)
 _ASSETS_DIR = FRONTEND_DIST / "assets"
@@ -54,5 +53,5 @@ async def spa_fallback(full_path: str):
     if INDEX_HTML.exists():
         return FileResponse(INDEX_HTML)
     if full_path == "":
-        return {"service": "GraphRAG API — Штаб Тесла", "version": "1.0.0"}
+        return {"service": "Летопись — Штаб Тесла", "version": "1.0.0"}
     raise HTTPException(status_code=404, detail="Not found")

@@ -1,7 +1,7 @@
 """Чистая Wiki: tools_loop поверх storage/wiki/*.md (GigaChat function calling).
 
 Одна функция-вход: try_wiki_answer(question) -> dict | None.
-None = в wiki нет данных (вызывающий код делает fallback в обычный RAG).
+None = в wiki нет подтверждённого ответа. Legacy fallback отсутствует.
 Модель ничего не исполняет: она лишь возвращает function_call,
 исполняет _dispatch() локально, только чтением .md.
 """
@@ -14,6 +14,11 @@ from pathlib import Path
 WIKI_DIR = Path(__file__).resolve().parent.parent.parent / "storage" / "wiki"
 MAX_TURNS = 5
 READ_LIMIT = 6000
+SILENCE = "В архивах нет данных."
+
+
+class WikiUnavailable(RuntimeError):
+    """Wiki provider or canonical instructions are unavailable."""
 
 FUNCTIONS = [
     {
@@ -56,6 +61,7 @@ FUNCTIONS = [
             "type": "object",
             "properties": {
                 "slug": {"type": "string", "description": "Page slug, e.g. lso/spo_yunost"},
+                "offset": {"type": "integer", "description": "Continue reading from next_offset returned by a truncated fragment"},
                 "section": {
                     "type": "string",
                     "description": "Optional section heading to read instead of page head, e.g. Награды и достижения",
@@ -91,9 +97,28 @@ _SLUG_RE = re.compile(r"^[a-z0-9_/]+$")
 _TITLE_RE = re.compile(r"(?m)^# (.+?)\s*$")
 _KIND_RE = re.compile(r"(?m)^kind:\s*(\S+)\s*$")
 _LINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
-_MD_URL_RE = re.compile(r"\[[^\]]*\]\((https://[^)]+)\)")
+_MD_URL_RE = re.compile(r"\[[^\]]*\]\(((?:https://|/api/v1/wiki/source\?)[^)]+)\)")
 _SKIP = {"AGENTS.md", "log.md"}
 _NOINDEX = {"index.md", "timeline.md"}  # навигация: читается, но в поиске не участвует
+_STATUS_RE = re.compile(r"(?m)^status:\s*stub\s*$")
+_STOP = {"кто", "что", "как", "какой", "какая", "какие", "когда", "где", "был", "была", "были", "это", "про", "для", "год", "году", "ссо", "спо", "сэо", "осд", "смо", "соп", "ссерв"}
+
+
+def _terms(text: str) -> list[str]:
+    words = re.findall(r"[a-zа-я0-9]+", text.lower().replace("ё", "е"))
+    result = []
+    for word in words:
+        if len(word) < 3 or word in _STOP:
+            continue
+        if word.startswith("команд"):
+            word = "команд"
+        elif word.startswith("комисс"):
+            word = "комисс"
+        elif len(word) > 5:
+            word = re.sub(r"(?:ами|ями|ого|ему|ому|ах|ях|ой|ей|ов|ев|ы|и|а|я|у|ю|е)$", "", word)
+        if word not in result:
+            result.append(word)
+    return result
 
 
 def page_meta(slug: str, path: Path) -> dict:
@@ -130,7 +155,15 @@ def wiki_graph() -> dict:
 def _pages() -> dict[str, Path]:
     out = {}
     for f in WIKI_DIR.rglob("*.md"):
-        if f.name.startswith("_") or f.name in _SKIP:
+        if not f.is_file() or not f.resolve().is_relative_to(WIKI_DIR.resolve()):
+            continue
+        if any(p.startswith("_") for p in f.relative_to(WIKI_DIR).parts) or f.name in _SKIP:
+            continue
+        try:
+            text = f.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        if _STATUS_RE.search(text):
             continue
         out[f.relative_to(WIKI_DIR).with_suffix("").as_posix()] = f
     return out
@@ -147,12 +180,9 @@ def _sections(text: str) -> list[tuple[str, str]]:
 
 
 def wiki_search(query: str, top_k: int = 5) -> dict:
-    # ponytail: naive substring rank over ~140 files; FTS5 if it measurably lags
-    toks = [t.lower() for t in re.findall(r"[a-zа-яё0-9]+", query, re.I) if len(t) > 2]
+    toks = _terms(query)
     if not toks:
         return {"status": "fail", "items": []}
-    # ponytail: наивный стемминг (обрезка 2 букв) вместо pymorphy; морфология — апгрейд при промахах
-    stems = [t[:-2] if len(t) > 5 else t for t in toks]
     hits = []
     for slug, path in _pages().items():
         if path.name in _NOINDEX:
@@ -161,26 +191,42 @@ def wiki_search(query: str, top_k: int = 5) -> dict:
             text = path.read_text(encoding="utf-8")
         except OSError:
             continue
-        low = text.lower()
+        page_title = page_meta(slug, path)["title"].lower().replace("ё", "е")
+        identity = sum(1 for t in toks if not t.isdigit() and t in page_title)
         for title, body in _sections(text):
-            hay = f"{title}\n{body}".lower()
-            cover = sum(1 for t in toks if t in hay) + sum(1 for s in stems if s in hay)
-            if not cover:
-                continue
-            score = 100 * cover + sum(hay.count(t) for t in toks) + sum(hay.count(s) for s in stems)
-            hits.append((score, slug, title, body[:400]))
+            for offset in range(0, max(1, len(body)), 1000):
+                chunk = body[offset:offset + 1400]
+                hay = f"{title}\n{chunk}".lower().replace("ё", "е")
+                matched = [t for t in toks if t in hay]
+                if not matched:
+                    continue
+                score = identity * 500 + len(matched) * 30
+                score += sum(80 for t in toks if t in title.lower().replace("ё", "е"))
+                score += sum(50 for t in matched if t.isdigit())
+                positions = [chunk.lower().replace("ё", "е").find(t) for t in matched]
+                start = max(0, min((p for p in positions if p >= 0), default=0) - 120)
+                hits.append((score, slug, title, chunk[start:start + 600], offset + start))
     hits.sort(reverse=True)
+    selected = []
+    seen = set()
+    for _, slug, title, snippet, offset in hits:
+        if (slug, title) in seen:
+            continue
+        seen.add((slug, title))
+        selected.append({"slug": slug, "section": title, "snippet": snippet, "offset": offset})
+        if len(selected) >= max(1, min(top_k, 20)):
+            break
     return {
         "status": "success" if hits else "fail",
-        "items": [{"slug": s, "section": t, "snippet": b} for _, s, t, b in hits[: max(1, top_k)]],
+        "items": selected,
     }
 
 
-def wiki_read(slug: str, section: str = "") -> dict:
+def wiki_read(slug: str, section: str = "", offset: int = 0, *, full: bool = False) -> dict:
     if not _SLUG_RE.match(slug or ""):
         return {"status": "fail", "error": "bad slug"}
     path = (WIKI_DIR / f"{slug}.md").resolve()
-    if WIKI_DIR not in path.parents or not path.is_file():
+    if WIKI_DIR.resolve() not in path.parents or slug not in _pages():
         return {"status": "fail", "error": "not found"}
     text = path.read_text(encoding="utf-8")
     if section:
@@ -189,12 +235,23 @@ def wiki_read(slug: str, section: str = "") -> dict:
             if want in title.lower():
                 text = f"## {title}\n{body}"
                 break
+        else:
+            return {"status": "fail", "error": "section not found"}
+    if offset < 0 or offset >= max(1, len(text)):
+        return {"status": "fail", "error": "bad offset"}
+    fragment = text if full else text[offset:offset + READ_LIMIT]
+    sources = sorted(set(_MD_URL_RE.findall(fragment)))
+    from backend.wiki.sources import source_details
     return {
         "status": "success",
         "slug": slug,
-        "markdown": text[:READ_LIMIT],
-        "links": sorted(set(_LINK_RE.findall(text))),
-        "sources": sorted(set(_MD_URL_RE.findall(text)))[:20],
+        "markdown": fragment,
+        "links": sorted(set(_LINK_RE.findall(fragment))),
+        "sources": sources,
+        "source_details": source_details(sources, WIKI_DIR),
+        "truncated": not full and offset + len(fragment) < len(text),
+        "next_offset": offset + len(fragment) if not full and offset + len(fragment) < len(text) else None,
+        "total_chars": len(text),
     }
 
 
@@ -202,31 +259,74 @@ def _dispatch(name: str, args: dict) -> dict:
     if name == "wiki_search":
         return wiki_search(str(args.get("query", "")), int(args.get("top_k", 5) or 5))
     if name == "wiki_read":
-        return wiki_read(str(args.get("slug", "")), str(args.get("section", "")))
+        return wiki_read(str(args.get("slug", "")), str(args.get("section", "")), int(args.get("offset", 0) or 0))
     return {"status": "fail", "error": "unknown function"}
 
 
-def try_wiki_answer(question: str, client=None) -> dict | None:
-    """Ответ из wiki через tools_loop; None — нет данных, вызывающий делает fallback."""
+def try_wiki_answer(question: str, client=None, *, raise_on_error: bool = False) -> dict | None:
+    """Answer using bounded Wiki reads; failures never initiate another retrieval path."""
     import os
 
     if client is None:
         if os.environ.get("TESLA_WIKI_ENABLED", "1") != "1":
-            return None  # тесты/стенды без GigaChat: сразу fallback
+            return None  # Wiki отключена для этого стенда.
         from backend.utils.gigachat_client import GigaChatClient
 
         client = GigaChatClient()
+    from backend.wiki.prompts import query_prompt
+    try:
+        system = query_prompt()
+    except OSError as exc:
+        if raise_on_error:
+            raise WikiUnavailable("Не удалось загрузить правила Летописи.") from exc
+        return None
     messages: list[dict] = [
-        {"role": "system", "content": SYSTEM},
+        {"role": "system", "content": system},
         {"role": "user", "content": question},
     ]
     used: list[str] = []
     sources: list[dict] = []
+    calls: list[dict] = []
+
+    def finish(answer: str) -> dict | None:
+        if not answer:
+            return None
+        if answer == SILENCE:
+            return {"answer": answer, "pages": used, "sources": [], "calls": calls}
+        cited = set(_MD_URL_RE.findall(answer))
+        known = {s["url"].rstrip(".,;"): s for s in sources}
+        if not used or not cited or any(u.rstrip(".,;") not in known for u in cited):
+            return None
+        if "[[" in answer or any(
+                not _MD_URL_RE.search(block) for block in re.split(r"\n\s*\n", answer)
+                if block.strip() and not all(re.match(r"^\s*#{1,6}\s", line) for line in block.splitlines() if line.strip())):
+            return None
+        def readable_citation(match):
+            label, url = match.groups()
+            if re.fullmatch(r"(?:источник\s+)?(?:wall-?\d+_\d+|archive:.+|group:.+)", label, re.IGNORECASE):
+                detail = known.get(url.rstrip(".,;"), {})
+                label = str(detail.get("title") or "Публикация")[:120].replace("[", "(").replace("]", ")")
+            return f"[{label}]({url})"
+        answer = re.sub(r"\[([^\]]+)\]\(((?:https?://|/api/v1/wiki/source\?)[^)]+)\)", readable_citation, answer)
+        return {"answer": answer, "pages": used, "sources": [known[u.rstrip(".,;")] for u in sorted(cited)], "calls": calls}
     state_id = None
+
+    def checked_response(response: dict) -> dict:
+        if not isinstance(response, dict) or not isinstance(response.get("message"), dict):
+            raise ValueError("invalid provider response")
+        message = response["message"]
+        if message.get("content") is not None and not isinstance(message["content"], str):
+            raise ValueError("invalid provider content")
+        if message.get("function_call") is not None and not isinstance(message["function_call"], dict):
+            raise ValueError("invalid provider function call")
+        return response
+
     for _ in range(MAX_TURNS):
         try:
-            resp = client.chat_with_functions(messages, FUNCTIONS)
-        except Exception:
+            resp = checked_response(client.chat_with_functions(messages, FUNCTIONS))
+        except Exception as exc:
+            if raise_on_error:
+                raise WikiUnavailable("Летопись временно недоступна. Попробуйте позже.") from exc
             return None
         msg = resp.get("message") or {}
         if msg.get("functions_state_id"):
@@ -239,12 +339,20 @@ def try_wiki_answer(question: str, client=None) -> dict | None:
                     args = json.loads(args)
                 except ValueError:
                     args = {}
-            result = _dispatch(fc["name"], args if isinstance(args, dict) else {})
+            if not isinstance(args, dict):
+                args = {}
+            try:
+                if fc["name"] == "wiki_read" and len(used) >= 5 and args.get("slug") not in used:
+                    result = {"status": "fail", "error": "page budget exhausted; use pages already read"}
+                else:
+                    result = _dispatch(fc["name"], args if isinstance(args, dict) else {})
+            except (TypeError, ValueError):
+                result = {"status": "fail", "error": "invalid function arguments"}
+            calls.append({"name": fc["name"], "arguments": args, "result": result})
             if fc["name"] == "wiki_read" and result.get("status") == "success":
                 if result["slug"] not in used:
                     used.append(result["slug"])
-                for u in result.get("sources") or []:
-                    s = {"title": result["slug"], "url": u}
+                for s in result.get("source_details") or []:
                     if s not in sources:
                         sources.append(s)
             assistant = {"role": "assistant", "content": "", "function_call": {"name": fc["name"], "arguments": args}}
@@ -253,10 +361,16 @@ def try_wiki_answer(question: str, client=None) -> dict | None:
             messages += [assistant, {"role": "function", "name": fc["name"], "content": json.dumps(result, ensure_ascii=False)}]
             continue
         answer = (msg.get("content") or "").strip()
-        return {"answer": answer, "pages": used, "sources": sources[:10]} if answer else None
+        result = finish(answer)
+        if result is not None or not used or not sources:
+            return result
+        messages += [{"role":"assistant", "content":answer}, {"role":"user", "content":
+            "Revise using only the evidence already read. Return a short Russian answer. Every non-heading paragraph must contain its own Markdown primary-source citation from the tool results. Do not output internal [[Wiki links]], file paths, unsupported claims, or uncited summaries. Use descriptive citation labels. If evidence is absent, return exactly: В архивах нет данных."}]
     try:  # последний шанс: прямой ответ без функций
-        resp = client.chat_with_functions(messages, FUNCTIONS, function_call="none")
+        resp = checked_response(client.chat_with_functions(messages, FUNCTIONS, function_call="none"))
         answer = ((resp.get("message") or {}).get("content") or "").strip()
-    except Exception:
+    except Exception as exc:
+        if raise_on_error:
+            raise WikiUnavailable("Летопись временно недоступна. Попробуйте позже.") from exc
         return None
-    return {"answer": answer, "pages": used, "sources": sources[:10]} if answer else None
+    return finish(answer)

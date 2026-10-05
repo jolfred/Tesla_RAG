@@ -18,7 +18,6 @@ from backend.admin import prompts as _prompts
 from backend.admin import settings as _settings
 from backend.admin.db import get_connection, init_admin_db
 from backend.admin.groups import append_link, group_statuses
-from backend.admin.indexing import project_composition, project_stats
 from backend.api.auth import verify_admin_session
 from backend.config import DOCUMENTS_DIR
 from backend.utils.logger import setup_logger
@@ -344,54 +343,12 @@ async def admin_index_project(
     body: dict,
     _: dict = Depends(verify_admin_session),
 ) -> dict:
-    """Положить индексацию проекта в очередь (не запускать)."""
-    init_admin_db()
-    conn = get_connection()
-    try:
-        exists = (
-            conn.execute("SELECT 1 FROM projects WHERE slug = ?", (slug,)).fetchone()
-            is not None
-        )
-    finally:
-        conn.close()
-    if not exists:
-        raise HTTPException(status_code=404, detail="project not found")
-    comp = project_composition(slug)
-    if not comp["vk_groups"] and not comp["docs"]:
-        raise HTTPException(status_code=400, detail="проект пуст: привяжите группы или документы")
-    model = body.get("model") or "gigachat"
-    if model not in ("gigachat", "gemma", "proxyapi"):
-        raise HTTPException(status_code=400, detail="model: gigachat | gemma | proxyapi")
-    extractor = body.get("extractor") or "transformer"
-    if extractor not in ("legacy", "transformer"):
-        raise HTTPException(status_code=400, detail="extractor: legacy | transformer")
-    min_date = str(body.get("min_date") or "")
-    force = bool(body.get("force"))
-    label = f"Индекс {slug} [{model}/{extractor}]" + (" +force" if force else "")
-    job = _jobs.create_job(
-        "index",
-        project_slug=slug,
-        label=label,
-        params={"slug": slug, "model": model, "extractor": extractor,
-                "min_date": min_date, "force": force},
-    )
-    return {"job_id": job["id"], "status": "queued"}
+    raise HTTPException(status_code=410, detail="Графовая индексация отключена. Используйте компиляцию Wiki.")
 
 
 @router.get("/api/v1/admin/projects/{slug}/stats")
 async def admin_project_stats(slug: str, _: dict = Depends(verify_admin_session)) -> dict:
-    init_admin_db()
-    conn = get_connection()
-    try:
-        exists = (
-            conn.execute("SELECT 1 FROM projects WHERE slug = ?", (slug,)).fetchone()
-            is not None
-        )
-    finally:
-        conn.close()
-    if not exists:
-        raise HTTPException(status_code=404, detail="project not found")
-    return project_stats(slug)
+    raise HTTPException(status_code=409, detail="Этот проект ещё не подключён к Летописи.")
 
 
 # --- Тест чата по проекту (шаг 4): всегда с контекстом ---
@@ -402,9 +359,9 @@ _searcher = None
 def _get_searcher():
     global _searcher
     if _searcher is None:
-        from backend.rag.searcher import GraphRAGSearcher
+        from backend.wiki.service import WikiAnswerService
 
-        _searcher = GraphRAGSearcher()
+        _searcher = WikiAnswerService()
     return _searcher
 
 
@@ -427,7 +384,13 @@ async def admin_chat(body: dict, _: dict = Depends(verify_admin_session)) -> dic
         if not exists:
             raise HTTPException(status_code=404, detail="project not found")
     try:
-        result = _get_searcher().search(question, include_context=True, project_slug=slug)
+        from fastapi.concurrency import run_in_threadpool
+        from backend.wiki.service import WikiProjectUnavailable, WikiUnavailable
+        result = await run_in_threadpool(_get_searcher().search, question, include_context=True, project_slug=slug)
+    except WikiProjectUnavailable as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except WikiUnavailable:
+        raise HTTPException(status_code=503, detail="Летопись временно недоступна. Попробуйте позже.")
     except Exception as e:
         logger.error("Admin chat failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -490,68 +453,8 @@ async def admin_graph_export(
     edge_limit: int = 300,
     _: dict = Depends(verify_admin_session),
 ) -> dict:
-    from backend.admin.indexing import project_source_model
-    from backend.rag.planner_common import MODEL as DEFAULT_MODEL
-
-    if project_slug:
-        init_admin_db()
-        conn = get_connection()
-        try:
-            exists = (
-                conn.execute(
-                    "SELECT 1 FROM projects WHERE slug = ?", (project_slug,)
-                ).fetchone()
-                is not None
-            )
-        finally:
-            conn.close()
-        if not exists:
-            raise HTTPException(status_code=404, detail="project not found")
-        model = project_source_model(project_slug)
-    else:
-        model = DEFAULT_MODEL
-    node_limit = max(10, min(node_limit, 500))
-    edge_limit = max(10, min(edge_limit, 1000))
-    try:
-        from neo4j import GraphDatabase
-
-        from backend.config import NEO4J_PASS, NEO4J_URI, NEO4J_USER
-
-        driver = GraphDatabase.driver(
-            NEO4J_URI,
-            auth=(NEO4J_USER, NEO4J_PASS),
-            connection_timeout=3,
-            max_transaction_retry_time=5,
-        )
-        try:
-            with driver.session() as session:
-                nrows = session.run(
-                    "MATCH (n) WHERE n.source_model = $m "
-                    "RETURN coalesce(n.norm_id, n.id, n.name) AS id, "
-                    "head(labels(n)) AS label, coalesce(n.name, n.id, '') AS name "
-                    "LIMIT $lim",
-                    m=model,
-                    lim=node_limit,
-                ).data()
-                erows = session.run(
-                    "MATCH (a)-[r]->(b) "
-                    "WHERE a.source_model = $m AND b.source_model = $m "
-                    "RETURN coalesce(a.norm_id, a.id, a.name) AS a, "
-                    "type(r) AS rel, coalesce(b.norm_id, b.id, b.name) AS b "
-                    "LIMIT $lim",
-                    m=model,
-                    lim=edge_limit,
-                ).data()
-        finally:
-            driver.close()
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Neo4j недоступен: {e}")
-    return {
-        "source_model": model,
-        "browser_url": _browser_url(),
-        "nodes": [{"id": str(r["id"]), "label": r["label"], "name": r["name"]} for r in nrows],
-        "edges": [{"a": str(r["a"]), "rel": r["rel"], "b": str(r["b"])} for r in erows],
-    }
+    from backend.wiki.loop import wiki_graph
+    return wiki_graph()
 
 
 # --- Ключи (шаг 7): без рестарта, значения наружу не отдаём ---

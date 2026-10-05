@@ -4,7 +4,7 @@ import { api } from '../api/client'
 import teslaFavicon from '../assets/logos/tesla.jpg'
 import WikiArticle from './WikiArticle'
 import WikiCatalog from './WikiCatalog'
-import { categoryOf } from './wikilinks'
+import { categoryName, categoryOf } from './wikilinks'
 
 /** Поиск в шапке -> каталог с ?q=. */
 function SearchBox(): React.JSX.Element {
@@ -84,7 +84,7 @@ function Sidebar(): React.JSX.Element {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {cats.map(([c, n]) => (
               <a key={c} href={`/wiki?cat=${c}`} style={link}>
-                {c} · {n}
+                {categoryName(c)} · {n}
               </a>
             ))}
           </div>

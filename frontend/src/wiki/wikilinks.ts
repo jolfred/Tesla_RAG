@@ -4,11 +4,17 @@ const CATEGORY_ALIAS: Record<string, string> = {
   projects: 'project',
   index: 'wiki',
 }
+const CATEGORY_NAMES: Record<string, string> = { person: 'Люди', squad: 'Отряды', project: 'Проекты', wiki: 'Летопись', event: 'События', heritage: 'Традиции', methodology: 'Методика', hq: 'Штаб' }
 
 /** Нормализованная категория по слагу ИЛИ bare-kind (frontmatter kind без `/`). */
 export function categoryOf(slugOrKind: string): string {
   const head = slugOrKind.includes('/') ? slugOrKind.split('/')[0] : slugOrKind
   return CATEGORY_ALIAS[head] ?? head
+}
+
+export function categoryName(slugOrKind: string): string {
+  const category = categoryOf(slugOrKind)
+  return CATEGORY_NAMES[category] ?? category[0]?.toUpperCase() + category.slice(1)
 }
 
 /** Заголовок -> якорь: нижний регистр, пробелы в _, только буквы/цифры. */

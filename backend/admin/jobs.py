@@ -26,7 +26,7 @@ logger = setup_logger("admin_jobs")
 LOGS_DIR = STORAGE_DIR / "logs"
 
 # kind -> человеческое описание шаблона
-KINDS = ("scrape_posts", "scrape_meta", "index")
+KINDS = ("scrape_posts", "scrape_meta")
 
 
 def _now() -> str:
@@ -170,10 +170,7 @@ def _check_params(kind: str, params: dict) -> None:
         if limit < 0:
             raise ValueError("limit >= 0")
     elif kind == "index":
-        if params.get("model") not in ("gigachat", "gemma", "proxyapi"):
-            raise ValueError("model: gigachat | gemma | proxyapi")
-        if params.get("extractor") not in ("legacy", "transformer"):
-            raise ValueError("extractor: legacy | transformer")
+        raise ValueError("Графовая индексация отключена. Используйте компиляцию Wiki.")
     else:
         raise ValueError(f"unknown kind: {kind}")
 
@@ -196,25 +193,7 @@ def build_argv(job: dict) -> list[str]:
         elif int(params.get("limit") or 0) > 0:
             argv += ["--limit", str(int(params["limit"]))]
         return argv
-    # kind == "index"
-    slug = (job.get("project_slug") or params.get("slug") or "").strip()
-    if not slug:
-        raise ValueError("пустой проект")
-    argv = python_module_cmd("backend.admin.run_index", slug) + [
-        "--model", params["model"],
-        "--extractor", params["extractor"],
-        "--min-date", str(params.get("min_date") or ""),
-    ]
-    if params.get("force"):
-        argv.append("--force")
-    return argv
-    conn = get_connection()
-    try:
-        cols = ", ".join(f"{k} = ?" for k in fields)
-        conn.execute(f"UPDATE jobs SET {cols} WHERE id = ?", (*fields.values(), job_id))
-        conn.commit()
-    finally:
-        conn.close()
+    raise ValueError("Графовая индексация отключена. Используйте компиляцию Wiki.")
 
 
 def _set(job_id: str, **fields: str) -> None:

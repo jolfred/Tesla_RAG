@@ -4,31 +4,37 @@ import { api } from '../api/client'
 import type { WikiNode, WikiPageData } from '../types'
 import { autolinkMentions, extractFootnotes, stripCites, wikiLinksToMd, type FootRef, type LinkEntry } from './footnotes'
 import { Markdown } from './markdown'
-import { categoryOf, extractInfobox, extractToc, type InfoRow, type TocEntry } from './wikilinks'
+import { categoryName, categoryOf, extractInfobox, extractToc, type InfoRow, type TocEntry } from './wikilinks'
 
 /** Frontmatter и служебный раздел «Источники данных» (локальные пути) вырезаны. */
 function stripService(markdown: string): string {
   const body = markdown.replace(/^---\n[\s\S]*?\n---\n/, '')
+  const serviceAnnotations = /(?:status:\s*(?:stub|verified|draft)|(?:^|[^\p{L}\p{N}_])(?:raw\s+нет|уточнение\s+Хранителя)(?![\p{L}\p{N}_]))/giu
+  const standaloneServiceLine = /^\s*(?:[-*]\s*)?(?:status:\s*(?:stub|verified|draft)|raw\s+нет|уточнение\s+Хранителя)\s*$/iu
   const lines: string[] = []
   let skip = false
   for (const line of body.split('\n')) {
     const h = /^(#{1,3})\s+(.*)$/.exec(line)
     if (h) skip = h[2].trim().toLowerCase() === 'источники данных'
-    if (!skip) lines.push(line)
+    if (!skip && !standaloneServiceLine.test(line)) lines.push(line)
   }
   return lines.join('\n')
+    .replace(/status:\s*(?:stub|verified|draft)/giu, '')
+    .replace(serviceAnnotations, (match) => /^[^\p{L}\p{N}_](?:raw|уточнение)/iu.test(match) ? match[0] : '')
+    .replace(/\(\s*[,;—–-]*\s*\)/g, '')
+    .replace(/[ \t]{2,}/g, ' ')
 }
 
 function ArticleView({ article, entries }: { article: WikiPageData; entries: LinkEntry[] }): React.JSX.Element {
   const { title, lead, rest, toc, rows, refs } = useMemo(() => {
     const stripped = stripService(article.markdown)
-    const { rows, rest: noBox } = extractInfobox(stripped)
+    const full = extractFootnotes(autolinkMentions(wikiLinksToMd(stripped), entries, article.slug), article.source_details ?? [])
+    const { rows, rest: noBox } = extractInfobox(full.text)
     const toc = extractToc(noBox)
-    const full = extractFootnotes(autolinkMentions(wikiLinksToMd(noBox), entries, article.slug))
     // Заголовок отдельно, лид — до первого ##, остальное — после (сноски нумеруются сквозно).
-    const m = /^#\s+(.+?)\s*$/m.exec(full.text)
+    const m = /^#\s+(.+?)\s*$/m.exec(noBox)
     const title = m ? m[1] : article.slug
-    const withoutTitle = m ? full.text.replace(m[0], '') : full.text
+    const withoutTitle = m ? noBox.replace(m[0], '') : noBox
     const cut = withoutTitle.search(/^##\s/m)
     const lead = cut === -1 ? withoutTitle : withoutTitle.slice(0, cut)
     const rest = cut === -1 ? '' : withoutTitle.slice(cut)
@@ -47,7 +53,7 @@ function ArticleView({ article, entries }: { article: WikiPageData; entries: Lin
       <div style={{ marginTop: 24, border: '1px solid #a2a9b1', background: '#f8f9fa', borderRadius: 2, padding: '10px 14px', fontSize: 13, color: '#202122' }}>
         Категории:{' '}
         <a href={`/wiki?cat=${categoryOf(article.slug)}`} style={{ color: '#3366CC', textDecoration: 'none' }}>
-          {categoryOf(article.slug)}
+          {categoryName(article.slug)}
         </a>
       </div>
       <div style={{ marginTop: 24 }}>
@@ -117,9 +123,7 @@ function Notes({ refs }: { refs: FootRef[] }): React.JSX.Element {
             <a href={r.url} target="_blank" rel="noreferrer" style={{ color: '#6D28D9', overflowWrap: 'anywhere' }}>
               {r.label}
             </a>{' '}
-            <a href={`#fnref-${r.n}`} aria-label="Вернуться к тексту" style={{ color: '#ABA094', textDecoration: 'none' }}>
-              ↩
-            </a>
+            {r.markers.map((marker, i) => <a key={marker} href={`#fnref-${marker}`} aria-label={`Вернуться к упоминанию ${i + 1}`} style={{ color: '#ABA094', textDecoration: 'none', marginLeft: 4 }}>↩</a>)}
           </li>
         ))}
       </ol>

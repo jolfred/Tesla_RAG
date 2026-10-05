@@ -9,7 +9,7 @@ export type AdminTab =
   | 'projects'
   | 'chat'
   | 'prompts'
-  | 'graphs'
+  | 'wiki-graph'
   | 'keys'
 
 export interface AdminProject {
@@ -29,9 +29,9 @@ export const ADMIN_TABS: { id: AdminTab; title: string; hint: string }[] = [
   { id: 'docs', title: 'Документы', hint: 'Загрузка и список (шаг 1)' },
   { id: 'groups', title: 'VK-группы', hint: 'Группы, спарсенное, кнопки «в очередь»' },
   { id: 'queue', title: 'Очередь', hint: 'Что запускать, куда и с какими параметрами' },
-  { id: 'projects', title: 'Проекты', hint: 'Группировка и индексация (шаг 3)' },
-  { id: 'chat', title: 'Тест чата', hint: 'Проверка ответов (шаг 4)' },
-  { id: 'prompts', title: 'Промпты', hint: 'Редактор промптов (шаг 5)' },
-  { id: 'graphs', title: 'Графы', hint: 'Ссылки и просмотр (шаг 6)' },
-  { id: 'keys', title: 'Ключи', hint: 'API-ключи без рестарта (шаг 7)' },
+  { id: 'projects', title: 'Проекты', hint: 'Группировка материалов; поиск пока работает по Летописи' },
+  { id: 'chat', title: 'Тест чата', hint: 'Проверка ответов по Летописи' },
+  { id: 'prompts', title: 'Промпты', hint: 'Редактор промптов' },
+  { id: 'wiki-graph', title: 'Граф Wiki', hint: 'Статьи Летописи и ссылки между ними' },
+  { id: 'keys', title: 'Ключи', hint: 'API-ключи без рестарта' },
 ]
