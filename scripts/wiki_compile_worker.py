@@ -145,7 +145,17 @@ def main() -> None:
         try:
             run(args)
         except WorkerStopped:
-            record(args.run_dir, "stopped", note="Persisted ledger and proposals will resume on the next start.")
+            try:
+                previous = json.loads((args.run_dir / "continuation-state.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                previous = {}
+            if previous.get("state") == "waiting_for_provider":
+                saved = {key: value for key, value in previous.items()
+                         if key not in {"state", "updated_at", "worker_pid", "note"}}
+                record(args.run_dir, "waiting_for_provider", **saved,
+                       note="Worker stopped; provider cooldown remains in effect on the next start.")
+            else:
+                record(args.run_dir, "stopped", note="Persisted ledger and proposals will resume on the next start.")
         except Exception as exc:
             record(args.run_dir, "worker_error", reason=f"{type(exc).__name__}: {exc}")
             raise
