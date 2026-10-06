@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from backend.wiki.ingest import (
     apply_proposals, connect, export_posts, import_results, relevant_page_catalog, relevant_pages,
@@ -110,6 +110,24 @@ def _json_object(text: str) -> dict[str, Any]:
     if not isinstance(obj, dict):
         raise ValueError("provider output must be a JSON object")
     return obj
+
+
+def _validate_extraction(result: dict[str, Any], posts: list[dict[str, Any]]) -> None:
+    expected = {(x["post_id"], x["source_hash"]) for x in posts}
+    returned = result.get("posts")
+    if not isinstance(returned, list) or any(not isinstance(x, dict) for x in returned):
+        raise ValueError("extraction posts must be a list of objects")
+    received = [(str(x.get("post_id", "")), str(x.get("source_hash", ""))) for x in returned]
+    if len(received) != len(set(received)) or set(received) != expected:
+        raise ValueError("extraction must return exactly one result per supplied post and source hash")
+
+
+def _quarantine_output(output: Path) -> None:
+    """Retain a rejected response for review without reusing it as a valid cache."""
+    if output.exists():
+        rejected = output.parent / "rejected"
+        rejected.mkdir(parents=True, exist_ok=True)
+        output.replace(rejected / f"{output.stem}-{time.time_ns()}.json")
 
 
 def _output_schema(stage: str) -> dict[str, Any]:
@@ -306,18 +324,22 @@ def compile_wiki(db: Path, wiki: Path, run_dir: Path,
         extract_bundle = batch_dir / "extract-input.json"
         _atomic_json(extract_bundle, {"posts": bundle_posts, "relevant_pages": pages})
         extract_out = batch_dir / "extract.json"
+        if extract_out.exists():
+            try:
+                _validate_extraction(_json_object(extract_out.read_text(encoding="utf-8")), bundle_posts)
+            except ValueError as exc:
+                _quarantine_output(extract_out)
+                _provider_event(run_dir, {"provider":"cache", "effort":"low", "status":"rejected", "reason":str(exc)})
         if not extract_out.exists():
             try:
                 call_provider_resilient("low", extract_prompt, extract_bundle, extract_out,
-                    batch_dir / "extract-work", (extract_model, *extract_fallback_models), codex_fallback, agent, run_dir)
+                    batch_dir / "extract-work", (extract_model, *extract_fallback_models), codex_fallback, agent, run_dir,
+                    validator=lambda result: _validate_extraction(result, bundle_posts))
             except Exception as exc:
                 _record_queued_reason(db, queue, f"extraction blocked: {type(exc).__name__}")
                 raise
         extract_result = _json_object(extract_out.read_text(encoding="utf-8"))
-        expected = {(x["post_id"], x["source_hash"]) for x in bundle_posts}
-        received = [(str(x.get("post_id", "")), str(x.get("source_hash", ""))) for x in extract_result.get("posts", [])]
-        if len(received) != len(set(received)) or set(received) != expected:
-            raise ValueError(f"batch {batch_key}: extraction must return exactly one result per supplied post; output retained for repair")
+        _validate_extraction(extract_result, bundle_posts)
         # Persist/import before fetching next batch. Reimport is idempotent by (post, source hash, item ordinal).
         _atomic_json(batch_dir / "extract.json", extract_result)
         got = import_results(db, extract_out)
@@ -407,7 +429,8 @@ def _validate_canonical_prompt(prompt: str) -> None:
 
 def call_provider_resilient(effort: str, system_prompt: Path, bundle_path: Path, output_path: Path,
                             workdir: Path, free_models: tuple[str, ...], codex_fallback: bool,
-                            agent: str, run_dir: Path) -> dict[str, Any]:
+                            agent: str, run_dir: Path,
+                            validator: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
     failures = []
     for free_model in dict.fromkeys(free_models):
         if free_model not in FREE_MODELS:
@@ -415,22 +438,32 @@ def call_provider_resilient(effort: str, system_prompt: Path, bundle_path: Path,
         try:
             _provider_event(run_dir, {"provider":"opencode","model":free_model,"effort":effort,"status":"running"})
             result = call_provider("opencode", effort, system_prompt, bundle_path, output_path, workdir, free_model, agent)
+            if validator is not None:
+                validator(result)
             _provider_event(run_dir, {"provider":"opencode","model":free_model,"effort":effort,"status":"success"})
             return result
         except (subprocess.TimeoutExpired, RuntimeError, ValueError) as exc:
+            _quarantine_output(output_path)
             log = output_path.with_suffix(".cli.log")
             if log.exists():
                 shutil.copyfile(log, output_path.with_suffix("." + free_model.rsplit("/", 1)[-1] + ".cli.log"))
             failures.append({"model": free_model, "error": type(exc).__name__, "detail":str(exc)})
+            _provider_event(run_dir, {"provider":"opencode", "model":free_model, "effort":effort,
+                                     "status":"failed", "reason":str(exc)})
             _atomic_json(output_path.with_suffix(".free-failed.json"), failures)
     if codex_fallback and _codex_eligible(run_dir):
         try:
             _provider_event(run_dir, {"provider":"codex","model":"gpt-6-luna","effort":effort,"status":"running"})
             result = call_provider("codex", effort, system_prompt, bundle_path, output_path, workdir)
+            if validator is not None:
+                validator(result)
             _provider_event(run_dir, {"provider":"codex","model":"gpt-6-luna","effort":effort,"status":"success"})
             return result
         except (subprocess.TimeoutExpired, RuntimeError, ValueError) as exc:
-            failures.append({"model":"gpt-6-luna","error":type(exc).__name__})
+            _quarantine_output(output_path)
+            failures.append({"model":"gpt-6-luna","error":type(exc).__name__,"detail":str(exc)})
+            _provider_event(run_dir, {"provider":"codex", "model":"gpt-6-luna", "effort":effort,
+                                     "status":"failed", "reason":str(exc)})
     _atomic_json(output_path.with_suffix(".blocked.json"), {"reason":"all free OpenCode models failed; Codex ineligible or disabled","free_failures":failures})
     _provider_event(run_dir, {"provider":"blocked","effort":effort,"status":"blocked"})
     raise RuntimeError("all free OpenCode models failed; Codex fallback is disabled, unavailable, failed, or blocked by the actual quota guard; see saved provider status")
