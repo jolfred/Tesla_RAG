@@ -153,6 +153,7 @@ def _output_schema(stage: str) -> dict[str, Any]:
 
 def _opencode_text(stdout: str) -> str:
     chunks = []
+    message_id = None
     for line in stdout.splitlines():
         try: event = json.loads(line)
         except json.JSONDecodeError: continue
@@ -162,8 +163,18 @@ def _opencode_text(stdout: str) -> str:
         if not isinstance(event, dict):
             continue
         part = event.get("part", {})
-        if event.get("type") == "text" and isinstance(part, dict) and isinstance(part.get("text"), str): chunks.append(part["text"])
-        elif event.get("type") == "text" and isinstance(event.get("text"), str): chunks.append(event["text"])
+        if event.get("type") != "text":
+            continue
+        if isinstance(part, dict) and isinstance(part.get("text"), str):
+            current_id = part.get("messageID")
+            # OpenCode may emit a planning message before the final JSON reply.
+            # Read only the last message, preserving all of its text parts.
+            if isinstance(current_id, str) and current_id != message_id:
+                chunks = []
+                message_id = current_id
+            chunks.append(part["text"])
+        elif isinstance(event.get("text"), str):
+            chunks.append(event["text"])
     return "\n".join(chunks) if chunks else stdout
 
 
