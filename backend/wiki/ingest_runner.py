@@ -84,7 +84,7 @@ def _merge_rows(db: Path, wiki: Path, run_dir: Path, rows: list[Any], merge_prom
             continue
         merged = {"pages": candidates}; _atomic_json(output, merged)
         try:
-            stage_proposals(db, wiki, output)
+            stage_proposals(db, wiki, output, insertion_only=True)
         except (ValueError, TypeError, KeyError) as exc:
             _set_facts_review(db, facts, f"merge proposal validation failed: {type(exc).__name__}: {exc}")
             continue
@@ -299,10 +299,10 @@ def _exclusive_compile(function):
 def compile_wiki(db: Path, wiki: Path, run_dir: Path,
                  extract_prompt: Path, merge_prompt: Path, max_posts: int = 5,
                  batch_size: int = 50, char_budget: int = 40000,
-                 extract_model: str = "opencode/longcat-2.5-preview-free",
-                 extract_fallback_models: tuple[str, ...] = ("opencode/mimo-v2.6-flash-free", "opencode/nemotron-3-ultra-free"),
-                 merge_model: str = "opencode/longcat-2.5-preview-free",
-                 merge_fallback_models: tuple[str, ...] = ("opencode/mimo-v2.6-flash-free", "opencode/nemotron-3-ultra-free"),
+                 extract_model: str = "opencode/mimo-v2.6-flash-free",
+                 extract_fallback_models: tuple[str, ...] = ("opencode/longcat-2.5-preview-free", "opencode/nemotron-3-ultra-free"),
+                 merge_model: str = "opencode/mimo-v2.6-flash-free",
+                 merge_fallback_models: tuple[str, ...] = ("opencode/longcat-2.5-preview-free", "opencode/nemotron-3-ultra-free"),
                  do_apply: bool = False, codex_fallback: bool = True,
                  agent: str = "plan") -> dict[str, int]:
     if batch_size < 1 or batch_size > 50: raise ValueError("batch_size must be 1..50")

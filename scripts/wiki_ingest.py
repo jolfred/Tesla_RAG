@@ -16,9 +16,9 @@ from backend.wiki.ingest import (  # noqa: E402
 from backend.wiki.ingest_runner import compile_wiki, read_codex_limits  # noqa: E402
 from backend.wiki.legacy_progress import reconcile_legacy  # noqa: E402
 
-DEFAULT_EXTRACT = "opencode/longcat-2.5-preview-free"
+DEFAULT_EXTRACT = "opencode/mimo-v2.6-flash-free"
 DEFAULT_MERGE = DEFAULT_EXTRACT
-FREE_FALLBACKS = ["opencode/mimo-v2.6-flash-free", "opencode/nemotron-3-ultra-free"]
+FREE_FALLBACKS = ["opencode/longcat-2.5-preview-free", "opencode/nemotron-3-ultra-free"]
 FREE_MODEL_CHOICES = (DEFAULT_EXTRACT, *FREE_FALLBACKS,
                       "opencode/muse-spark-1.3-contributor-free", "opencode/ling-3.1-flash-free")
 

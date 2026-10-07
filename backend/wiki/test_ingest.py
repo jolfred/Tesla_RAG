@@ -139,12 +139,21 @@ class IngestTests(unittest.TestCase):
               'covered_facts':[{'post_id':'wall-12_34','source_hash':self.source_hash,'ordinal':0}],
               'markdown':None,'patches':[{'operation':'insert_after','old_text':anchor,'new_text':addition}]}
         merge=self.root/'merge.json';merge.write_text(json.dumps({'pages':[prop]}))
-        self.assertEqual(stage_proposals(self.db,self.wiki,merge),{'staged':1,'review':0})
+        self.assertEqual(stage_proposals(self.db,self.wiki,merge,insertion_only=True),{'staged':1,'review':0})
         self.assertEqual(apply_proposals(self.db,self.wiki)['applied_pages'],1)
         self.assertEqual(target.read_text().count(anchor),1)
         self.assertIn(anchor+'\n'+addition,target.read_text())
         operation=_output_schema('merge')['properties']['pages']['items']['properties']['patches']['items']['properties']['operation']
         self.assertEqual(operation['enum'],['insert_after'])
+
+    def test_routine_merge_rejects_legacy_replacement_patch(self):
+        target=self.wiki/'lso/yunost.md'
+        prop={'page_slug':'lso/yunost','new_page':False,'markdown':None,
+              'patches':[{'old_text':'## История','new_text':'## Новая история'}]}
+        handoff=self.root/'merge.json';handoff.write_text(json.dumps({'pages':[prop]}))
+        with self.assertRaisesRegex(ValueError,'requires insert_after'):
+            stage_proposals(self.db,self.wiki,handoff,insertion_only=True)
+        self.assertIn('## История',target.read_text())
 
     def test_shortened_full_article_is_sent_to_review(self):
         target=self.wiki/'lso/yunost.md';old=target.read_text()+'\n'+'Старая история отряда.\n'*100
@@ -314,6 +323,17 @@ class IngestTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             opencode_command(self.root,'opencode/longcat-2.5-preview-free','plan','invalid')
 
+    def test_worker_and_cli_try_verified_free_mimo_first(self):
+        import inspect
+        from scripts.wiki_ingest import DEFAULT_EXTRACT, DEFAULT_MERGE, FREE_FALLBACKS
+        params=inspect.signature(compile_wiki).parameters
+        self.assertEqual(DEFAULT_EXTRACT,'opencode/mimo-v2.6-flash-free')
+        self.assertEqual(DEFAULT_MERGE,DEFAULT_EXTRACT)
+        self.assertEqual(params['extract_model'].default,DEFAULT_EXTRACT)
+        self.assertEqual(params['merge_model'].default,DEFAULT_MERGE)
+        self.assertEqual(list(params['extract_fallback_models'].default),FREE_FALLBACKS)
+        self.assertNotIn(DEFAULT_EXTRACT,FREE_FALLBACKS)
+
     def test_free_fallback_models_are_not_retried_when_duplicated(self):
         from backend.wiki.ingest_runner import call_provider_resilient
         model='opencode/longcat-2.5-preview-free'
@@ -363,12 +383,12 @@ class IngestTests(unittest.TestCase):
                 fact=bundle['candidate_facts']['lso/yunost'][0]
                 old=(self.wiki/'lso/yunost.md').read_text(encoding='utf-8')
                 source='https://vk.com/wall-12_34'
-                markdown=old+'\n- Иван назван командиром. (Источник: [wall-12_34]('+source+')).\n'
+                addition='- Иван назван командиром. (Источник: [wall-12_34]('+source+')).\n'
                 result={'pages':[{'page_slug':'lso/yunost','expected_sha256':hashlib.sha256(old.encode()).hexdigest(),
                     'new_page':False,'source_post_ids':['wall-12_34'],
                     'source_refs':[{'post_id':'wall-12_34','source_hash':fact['source_hash']}],
                     'covered_facts':[{'post_id':'wall-12_34','source_hash':fact['source_hash'],'ordinal':fact['fact_ordinal']}],
-                    'markdown':markdown}]}
+                    'markdown':None,'patches':[{'operation':'insert_after','old_text':'## История','new_text':addition}]}]}
             if validator is not None:
                 validator(result)
             runner._atomic_json(output_path,result)

@@ -393,7 +393,7 @@ def retrieval_pack(db: Path, wiki: Path, query: str, limit: int = 5) -> dict[str
                                       for _, s, t in scored[:limit]]}
 
 
-def stage_proposals(db: Path, wiki: Path, handoff: Path) -> dict[str, int]:
+def stage_proposals(db: Path, wiki: Path, handoff: Path, *, insertion_only: bool = False) -> dict[str, int]:
     data = json.loads(handoff.read_text(encoding="utf-8"))
     if not isinstance(data, dict) or not isinstance(data.get("pages"), list):
         raise ValueError("merge handoff must contain pages array")
@@ -430,6 +430,8 @@ def stage_proposals(db: Path, wiki: Path, handoff: Path) -> dict[str, int]:
                 operation = patch.get("operation", "replace")
                 if operation not in {"replace", "insert_after"}:
                     raise ValueError("unsupported patch operation")
+                if insertion_only and operation != "insert_after":
+                    raise ValueError("routine compilation requires insert_after patches")
                 anchor, replacement = patch["old_text"], patch["new_text"]
                 if anchor:
                     if content.count(anchor) != 1:
@@ -440,6 +442,8 @@ def stage_proposals(db: Path, wiki: Path, handoff: Path) -> dict[str, int]:
                 else:
                     content = content.rstrip() + "\n\n" + replacement.strip() + "\n"
         reason = None
+        if insertion_only and prop.get("new_page") is not True and not isinstance(prop.get("patches"), list):
+            raise ValueError("routine compilation requires insertion patches, not a full article rewrite")
         if not isinstance(content, str) or not re.search(r"(?m)^#\s+\S", content):
             reason = "proposal lacks an article heading"
         elif not isinstance(refs, list) or not refs or len({json.dumps([x.get("post_id"), x.get("source_hash")], sort_keys=True) for x in refs if isinstance(x, dict)}) != len(refs) or any(not isinstance(x, dict) or (x.get("post_id"), x.get("source_hash")) not in known_pairs for x in refs):
