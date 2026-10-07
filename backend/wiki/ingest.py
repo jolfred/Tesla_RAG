@@ -427,10 +427,15 @@ def stage_proposals(db: Path, wiki: Path, handoff: Path) -> dict[str, int]:
             for patch in patches:
                 if not isinstance(patch, dict) or not all(isinstance(patch.get(key), str) for key in ("old_text", "new_text")):
                     raise ValueError("patch requires old_text and new_text strings")
+                operation = patch.get("operation", "replace")
+                if operation not in {"replace", "insert_after"}:
+                    raise ValueError("unsupported patch operation")
                 anchor, replacement = patch["old_text"], patch["new_text"]
                 if anchor:
                     if content.count(anchor) != 1:
                         raise ValueError("patch anchor must occur exactly once")
+                    if operation == "insert_after":
+                        replacement = anchor + "\n" + replacement
                     content = content.replace(anchor, replacement, 1)
                 else:
                     content = content.rstrip() + "\n\n" + replacement.strip() + "\n"

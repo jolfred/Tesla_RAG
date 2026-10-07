@@ -122,6 +122,30 @@ class IngestTests(unittest.TestCase):
         self.assertEqual(apply_proposals(self.db,self.wiki)['applied_pages'],1)
         self.assertIn('Существующая история отряда.',target.read_text())
 
+    def test_insert_after_preserves_the_exact_old_cited_line(self):
+        from backend.wiki.ingest_runner import _output_schema
+        target=self.wiki/'lso/yunost.md'
+        anchor='- Старая история. (Источник: [старый пост](https://vk.com/wall-12_10)).'
+        old=target.read_text()+'\n'+anchor+'\n';target.write_text(old)
+        item={'class':'event','page_slug':'lso/yunost','section':'## История','confidence':'high',
+              'joke_flag':False,'status':'verified','date_event':None,
+              'facts':[{'detail':'Иван назван командиром.','quote':'командиром стал Иван'}]}
+        handoff=self.root/'extract.json'
+        handoff.write_text(json.dumps({'posts':[{'post_id':'wall-12_34','source_hash':self.source_hash,'outcome':'extracted','items':[item]}]}))
+        import_results(self.db,handoff)
+        addition='- Иван назван командиром. (Источник: [wall-12_34](https://vk.com/wall-12_34)).'
+        prop={'page_slug':'lso/yunost','expected_sha256':hashlib.sha256(old.encode()).hexdigest(),'new_page':False,
+              'source_post_ids':['wall-12_34'],'source_refs':[{'post_id':'wall-12_34','source_hash':self.source_hash}],
+              'covered_facts':[{'post_id':'wall-12_34','source_hash':self.source_hash,'ordinal':0}],
+              'markdown':None,'patches':[{'operation':'insert_after','old_text':anchor,'new_text':addition}]}
+        merge=self.root/'merge.json';merge.write_text(json.dumps({'pages':[prop]}))
+        self.assertEqual(stage_proposals(self.db,self.wiki,merge),{'staged':1,'review':0})
+        self.assertEqual(apply_proposals(self.db,self.wiki)['applied_pages'],1)
+        self.assertEqual(target.read_text().count(anchor),1)
+        self.assertIn(anchor+'\n'+addition,target.read_text())
+        operation=_output_schema('merge')['properties']['pages']['items']['properties']['patches']['items']['properties']['operation']
+        self.assertEqual(operation['enum'],['insert_after'])
+
     def test_shortened_full_article_is_sent_to_review(self):
         target=self.wiki/'lso/yunost.md';old=target.read_text()+'\n'+'Старая история отряда.\n'*100
         target.write_text(old)

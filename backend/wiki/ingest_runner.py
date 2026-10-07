@@ -145,7 +145,7 @@ def _output_schema(stage: str) -> dict[str, Any]:
         post = obj({"post_id":string,"source_hash":string,"outcome":string,"reason":nullable,"items":array(item)})
         return obj({"posts":array(post)})
     covered = obj({"post_id":string,"source_hash":string,"ordinal":{"type":"integer"}})
-    patch = obj({"old_text":string,"new_text":string})
+    patch = obj({"operation":{"type":"string","enum":["insert_after"]},"old_text":string,"new_text":string})
     page = obj({"page_slug":string,"expected_sha256":nullable,"new_page":{"type":"boolean"},
                 "source_post_ids":array(string),"source_refs":array(source),"covered_facts":array(covered),"markdown":nullable,"patches":array(patch)})
     return obj({"pages":array(page)})
