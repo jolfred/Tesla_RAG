@@ -26,7 +26,7 @@ const VK_URL = /(?:https?:\/\/(?:www\.|m\.)?vk\.com\/|\/api\/v1\/wiki\/source\?r
 const VK_URL_G = new RegExp(VK_URL.source, 'g')
 const PUB_DATE = /опубл\.\s*(\d{4}-\d{2}-\d{2})/
 /** (Источник: …) с двумя уровнями скобок — покрывает ([wall](url)) внутри. */
-const CITE_RE = /\(Источник:\s*(?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)/g
+const CITE_RE = /\(Источники?:\s*(?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)/g
 const MD_LINK_VK = /\[([^\]]*)\]\(((?:https?:\/\/(?:www\.|m\.)?vk\.com\/|\/api\/v1\/wiki\/source\?ref=)[^)\s]+)\)/g
 const WIKI_LINK = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g
 /** [https://…] без (url) — артефакт ответов, а не ссылка. */
