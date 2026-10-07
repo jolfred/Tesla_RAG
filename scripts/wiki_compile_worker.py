@@ -60,8 +60,8 @@ def wait_until(deadline: dt.datetime) -> None:
 
 def run(args) -> None:
     policy = {"primary_provider": "free OpenCode CLI", "codex_fallback": args.codex_fallback,
-              "codex_minimum_remaining_percent": 10, "batch_size": 10,
-              "char_budget": 16000, "work_hours": "08:00–23:00 Europe/Moscow"}
+              "codex_minimum_remaining_percent": 10, "batch_size": args.batch_size,
+              "char_budget": args.char_budget, "work_hours": "08:00–23:00 Europe/Moscow"}
     delay = 900
     # Retain a cooldown across a restart; a reboot must not hammer a limited provider.
     try:
@@ -94,7 +94,7 @@ def run(args) -> None:
             result = compile_wiki(
                 args.db, args.wiki, args.run_dir,
                 ROOT / "schema/prompts/wiki_extract_en.md", ROOT / "schema/prompts/wiki_merge_en.md",
-                max_posts=10, batch_size=10, char_budget=16000,
+                max_posts=args.batch_size, batch_size=args.batch_size, char_budget=args.char_budget,
                 do_apply=True, codex_fallback=args.codex_fallback,
             )
         except RuntimeError as exc:
@@ -127,10 +127,16 @@ def main() -> None:
     parser.add_argument("--db", type=Path, default=ROOT / "storage/wiki/_ingest/ledger.sqlite")
     parser.add_argument("--wiki", type=Path, default=ROOT / "storage/wiki")
     parser.add_argument("--run-dir", type=Path, required=True)
+    parser.add_argument("--batch-size", type=int, choices=range(1, 51), default=10,
+                        help="maximum source records per extraction request (1..50)")
+    parser.add_argument("--char-budget", type=int, default=16000,
+                        help="source text character budget; sources are never truncated")
     parser.add_argument("--codex-fallback", action="store_true",
                         help="allow guarded Luna Low/Medium after all free models fail")
     parser.add_argument("--execute", action="store_true", help="explicitly permit compilation and provider calls")
     args = parser.parse_args()
+    if args.char_budget < 1:
+        parser.error("--char-budget must be positive")
     if not args.execute:
         parser.error("pass --execute to start the background compiler")
     args.run_dir.mkdir(parents=True, exist_ok=True)
