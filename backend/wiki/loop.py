@@ -11,6 +11,8 @@ import json
 import re
 from pathlib import Path
 
+from backend.wiki.editorial import public_markdown
+
 WIKI_DIR = Path(__file__).resolve().parent.parent.parent / "storage" / "wiki"
 MAX_TURNS = 5
 READ_LIMIT = 6000
@@ -142,7 +144,7 @@ def wiki_graph() -> dict:
     edges = []
     for slug, path in pages.items():
         try:
-            text = path.read_text(encoding="utf-8")
+            text = public_markdown(path.read_text(encoding="utf-8"))
         except OSError:
             continue
         for target in set(_LINK_RE.findall(text)):
@@ -188,7 +190,7 @@ def wiki_search(query: str, top_k: int = 5) -> dict:
         if path.name in _NOINDEX:
             continue
         try:
-            text = path.read_text(encoding="utf-8")
+            text = public_markdown(path.read_text(encoding="utf-8"))
         except OSError:
             continue
         page_title = page_meta(slug, path)["title"].lower().replace("ё", "е")
@@ -228,7 +230,7 @@ def wiki_read(slug: str, section: str = "", offset: int = 0, *, full: bool = Fal
     path = (WIKI_DIR / f"{slug}.md").resolve()
     if WIKI_DIR.resolve() not in path.parents or slug not in _pages():
         return {"status": "fail", "error": "not found"}
-    text = path.read_text(encoding="utf-8")
+    text = public_markdown(path.read_text(encoding="utf-8"))
     if section:
         want = section.strip().lower()
         for title, body in _sections(text):

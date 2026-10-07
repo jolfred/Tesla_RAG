@@ -8,7 +8,7 @@ import { categoryName, categoryOf, extractInfobox, extractToc, type InfoRow, typ
 
 /** Frontmatter и служебный раздел «Источники данных» (локальные пути) вырезаны. */
 function stripService(markdown: string): string {
-  const body = markdown.replace(/^---\n[\s\S]*?\n---\n/, '')
+  const body = markdown.replace(/^---\n[\s\S]*?\n---\n/, '').replace(/<!--[\s\S]*?-->/g, '')
   const serviceAnnotations = /(?:status:\s*(?:stub|verified|draft)|(?:^|[^\p{L}\p{N}_])(?:raw\s+нет|уточнение\s+Хранителя)(?![\p{L}\p{N}_]))/giu
   const standaloneServiceLine = /^\s*(?:[-*]\s*)?(?:status:\s*(?:stub|verified|draft)|raw\s+нет|уточнение\s+Хранителя)\s*$/iu
   const lines: string[] = []

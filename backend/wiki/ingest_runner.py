@@ -237,6 +237,8 @@ def call_provider(provider: str, effort: str, system_prompt: Path, bundle_path: 
     """Call a CLI; only the supplied batch bundle is in the model context."""
     workdir.mkdir(parents=True, exist_ok=True); output_path.parent.mkdir(parents=True, exist_ok=True)
     prompt = system_prompt.read_text(encoding="utf-8")
+    editorial_skill = Path(__file__).resolve().parents[2] / ".opencode/skills/wiki-editorial/SKILL.md"
+    prompt += "\n\n--- EDITORIAL SKILL ---\n\n" + editorial_skill.read_text(encoding="utf-8")
     _validate_canonical_prompt(prompt)
     if provider == "codex":
         selected_model = model or "gpt-6-luna"
