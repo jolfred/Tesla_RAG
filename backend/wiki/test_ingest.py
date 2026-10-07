@@ -208,6 +208,54 @@ class IngestTests(unittest.TestCase):
         self.assertLessEqual(len(catalog),5)
         self.assertTrue(all(set(x)=={'page_slug','title','headings'} for x in catalog))
 
+    def test_catalog_excludes_level_three_sections_from_extraction_hints(self):
+        page=self.wiki/'lso/yunost.md'
+        page.write_text(page.read_text()+'\n### Командиры\n',encoding='utf-8')
+        catalog=relevant_page_catalog(self.wiki,'Юность командир',5)
+        self.assertTrue(catalog)
+        self.assertTrue(all(h.startswith('## ') for entry in catalog for h in entry['headings']))
+
+    def test_future_placement_cannot_be_imported_as_verified(self):
+        from backend.wiki.ingest import validate_post_result
+        raw='В этом году отряд проведет третий трудовой семестр в лагере.'
+        sha=hashlib.sha256(raw.encode()).hexdigest()
+        item={'class':'event','page_slug':'lso/yunost','section':'## История','confidence':'high',
+              'joke_flag':False,'status':'verified','date_event':'2023',
+              'facts':[{'detail':raw,'quote':raw}]}
+        result={'post_id':'wall-12_34','source_hash':sha,'outcome':'extracted','items':[item]}
+        known={('wall-12_34',sha):raw}
+        self.assertIn('future event',validate_post_result(result,known)[0][1])
+        item['status']='planned'
+        self.assertIsNone(validate_post_result(result,known)[0][1])
+
+    def test_codex_model_effort_and_machine_usage_are_forwarded(self):
+        root=Path(__file__).resolve().parents[2]
+        prompt=root/'schema/prompts/wiki_extract_en.md'
+        bundle=self.root/'bundle.json'; bundle.write_text('{"posts":[]}',encoding='utf-8')
+        for model in ('gpt-6-luna','gpt-5.6-luna'):
+            for effort in ('low','medium'):
+                out=self.root/f'{model}-{effort}.json'
+                def fake_run(cmd, **kwargs):
+                    Path(cmd[cmd.index('-o')+1]).write_text('{"posts":[]}',encoding='utf-8')
+                    return SimpleNamespace(returncode=0,stdout='',stderr='')
+                with patch('backend.wiki.ingest_runner._codex_eligible',return_value=True) as guard, \
+                     patch('backend.wiki.ingest_runner.subprocess.run',side_effect=fake_run) as run:
+                    self.assertEqual(call_provider('codex',effort,prompt,bundle,out,self.root/'work',model),{'posts':[]})
+                guard.assert_called_once()
+                cmd=run.call_args.args[0]
+                self.assertEqual(cmd[cmd.index('-m')+1],model)
+                self.assertIn(f'model_reasoning_effort="{effort}"',cmd)
+                self.assertIn('--json',cmd)
+
+    def test_direct_codex_call_stops_when_quota_is_unavailable(self):
+        root=Path(__file__).resolve().parents[2]
+        with patch('backend.wiki.ingest_runner._codex_eligible',return_value=False), \
+             patch('backend.wiki.ingest_runner.subprocess.run') as run:
+            with self.assertRaisesRegex(RuntimeError,'actual quota guard'):
+                call_provider('codex','low',root/'schema/prompts/wiki_extract_en.md',
+                              self.root/'bundle.json',self.root/'out.json',self.root/'work')
+        run.assert_not_called()
+
     def test_opencode_call_has_prompt_and_bundle_attachments_and_readonly_agent(self):
         root=Path(__file__).resolve().parents[2]
         prompt=root/'schema/prompts/wiki_extract_en.md'; bundle=self.root/'bundle.json'; bundle.write_text('{"posts":[]}',encoding='utf-8')
@@ -279,7 +327,7 @@ class IngestTests(unittest.TestCase):
 
     def test_runner_persists_extract_then_stages_grounded_page_proposal_offline(self):
         import backend.wiki.ingest_runner as runner
-        def fake_provider(effort, prompt, bundle_path, output_path, workdir, models, codex, agent, run_dir):
+        def fake_provider(effort, prompt, bundle_path, output_path, workdir, models, codex, agent, run_dir, validator=None):
             bundle=json.loads(bundle_path.read_text(encoding='utf-8'))
             if effort == 'low':
                 post=bundle['posts'][0]
@@ -297,6 +345,8 @@ class IngestTests(unittest.TestCase):
                     'source_refs':[{'post_id':'wall-12_34','source_hash':fact['source_hash']}],
                     'covered_facts':[{'post_id':'wall-12_34','source_hash':fact['source_hash'],'ordinal':fact['fact_ordinal']}],
                     'markdown':markdown}]}
+            if validator is not None:
+                validator(result)
             runner._atomic_json(output_path,result)
             return result
         root=Path(__file__).resolve().parents[2]

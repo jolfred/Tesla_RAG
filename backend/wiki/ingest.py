@@ -180,7 +180,8 @@ def relevant_page_catalog(wiki: Path, query: str, limit: int = 5) -> list[dict[s
         slug = str(path.relative_to(wiki).with_suffix(""))
         title_match = re.search(r"(?m)^#\s+(.+)$", content)
         title = title_match.group(1).strip() if title_match else path.stem
-        headings = re.findall(r"(?m)^#{2,3}\s+.+$", content)
+        # The extraction handoff accepts level-two sections only.
+        headings = re.findall(r"(?m)^##\s+.+$", content)
         identity_text = (slug + " " + title).casefold()
         full_text = content.casefold()
         score = sum((8 if term in identity_text else 1) * min(full_text.count(term), 2) for term in terms)
@@ -253,6 +254,10 @@ def validate_post_result(result: dict[str, Any], known: dict[tuple[str, str], st
                     break
                 if not isinstance(fact.get("detail"), str) or not fact["detail"].strip():
                     why = "fact detail missing"
+                    break
+                if (item.get("class") == "event" and item.get("status") == "verified"
+                        and re.search(r"\b(?:провед[её]т|проведут|предстоит|состоится|состоятся)\b", quote, re.IGNORECASE)):
+                    why = "future event described as verified; requires review"
                     break
                 if not isinstance(item.get("page_slug"), str) or not re.fullmatch(r"[a-z0-9_/-]+", item["page_slug"]):
                     why = "invalid page_slug"

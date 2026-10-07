@@ -86,7 +86,7 @@ def _merge_rows(db: Path, wiki: Path, run_dir: Path, rows: list[Any], merge_prom
         try:
             stage_proposals(db, wiki, output)
         except (ValueError, TypeError, KeyError) as exc:
-            _set_facts_review(db, facts, f"merge proposal validation failed: {type(exc).__name__}")
+            _set_facts_review(db, facts, f"merge proposal validation failed: {type(exc).__name__}: {exc}")
             continue
         merge_calls += 1
         con = connect(db); proposal = con.execute("SELECT state,reason FROM proposals WHERE page_slug=?", (slug,)).fetchone(); con.close()
@@ -239,11 +239,18 @@ def call_provider(provider: str, effort: str, system_prompt: Path, bundle_path: 
     prompt = system_prompt.read_text(encoding="utf-8")
     _validate_canonical_prompt(prompt)
     if provider == "codex":
-        # Explicit Luna model; keep each stage's requested reasoning effort.
+        selected_model = model or "gpt-6-luna"
+        if selected_model not in {"gpt-6-luna", "gpt-5.6-luna"}:
+            raise ValueError("unsupported Codex compilation model")
+        if effort not in {"low", "medium"}:
+            raise ValueError("unsupported Codex compilation effort")
+        # Guard direct calls as well as the automatic fallback path.
+        if not _codex_eligible(workdir):
+            raise RuntimeError("Codex compilation blocked by actual quota guard")
         schema_path = output_path.with_suffix(".schema.json")
         _atomic_json(schema_path, _output_schema("extract" if "extract" in system_prompt.name else "merge"))
-        cmd = ["codex", "exec", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check",
-               "-m", "gpt-6-luna", "-c", f'model_reasoning_effort="{effort}"', "--output-schema", str(schema_path), "-o", str(output_path), "-"]
+        cmd = ["codex", "exec", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check", "--json",
+               "-m", selected_model, "-c", f'model_reasoning_effort="{effort}"', "--output-schema", str(schema_path), "-o", str(output_path), "-"]
         user = "Return only the JSON object required by the system instructions.\n\nINPUT BUNDLE:\n" + bundle_path.read_text(encoding="utf-8")
         with tempfile.TemporaryDirectory(prefix="tesla-wiki-cli-") as isolated:
             proc, _ = _run_cli(cmd, isolated, output_path.with_suffix(".cli.log"), input_text=prompt + "\n\n" + user)
