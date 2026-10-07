@@ -1,0 +1,15 @@
+[Unit]
+Description=Tesla Wiki website and API on Jolf
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Tesla_RAG
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/Tesla_RAG/.venv/bin/python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=10
+KillMode=control-group
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
