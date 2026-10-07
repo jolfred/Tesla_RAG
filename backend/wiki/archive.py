@@ -9,6 +9,7 @@ from urllib.parse import quote
 
 ARCHIVE_ID = re.compile(r"^archive:(chronicle_part_\d{3}\.txt):L(\d+)-L(\d+)$")
 GROUP_ID = re.compile(r"^group:([a-z0-9_]+)$")
+CURATOR_ID = re.compile(r"^curator:\d{4}-\d{2}-\d{2}:[a-z0-9_-]+$")
 EXCLUDED = {"kgeu_official", "spoyunost"}
 
 
@@ -89,11 +90,12 @@ def register_records(wiki: Path, sources: list[dict], documents: Path, groups: P
 
 
 def source_text(ref: str, wiki: Path) -> str | None:
-    if not ARCHIVE_ID.fullmatch(ref):
+    if not (ARCHIVE_ID.fullmatch(ref) or CURATOR_ID.fullmatch(ref)):
         return None
     record = read_records(wiki).get(ref)
     if not record:
         return None
-    header = [str(record.get("title") or "Архивная публикация"), str(record.get("group_name") or ""), "Дата публикации в архиве: " + str(record.get("published_at") or "не указана")]
+    label = "Дата уточнения: " if CURATOR_ID.fullmatch(ref) else "Дата публикации в архиве: "
+    header = [str(record.get("title") or "Архивная публикация"), str(record.get("group_name") or ""), label + str(record.get("published_at") or "не указана")]
     ranges = [f"{s['file']}#L{s['line_start']}-L{s['line_end']}" for s in record.get('source_segments',[])]
     return "\n".join(header + ranges) + "\n\n" + record['text']
