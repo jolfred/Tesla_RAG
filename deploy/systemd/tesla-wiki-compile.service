@@ -9,7 +9,7 @@ WorkingDirectory=%h/Tesla_RAG
 Environment=PATH=%h/.opencode/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=PYTHONUNBUFFERED=1
 Environment=LANGFUSE_ENABLED=0
-ExecStart=%h/Tesla_RAG/.venv/bin/python %h/Tesla_RAG/scripts/wiki_compile_worker.py --run-dir %h/Tesla_RAG/storage/wiki/_ingest/runs/main-2026-10-05 --execute --codex-fallback
+ExecStart=%h/Tesla_RAG/.venv/bin/python %h/Tesla_RAG/scripts/wiki_compile_worker.py --run-dir %h/Tesla_RAG/storage/wiki/_ingest/runs/main-2026-10-05 --batch-size 30 --char-budget 40000 --execute --codex-fallback
 Restart=on-failure
 RestartSec=15min
 KillMode=control-group
