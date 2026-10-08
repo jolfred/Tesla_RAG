@@ -381,6 +381,9 @@ def compile_wiki(db: Path, wiki: Path, run_dir: Path,
         mc, ac = _merge_rows(db, wiki, run_dir, fact_rows, merge_prompt, merge_model,
                              merge_fallback_models, codex_fallback, agent, do_apply)
         merge_calls += mc; applied += ac
+    if do_apply:
+        from backend.wiki.editorial import refresh_editorial_queue
+        refresh_editorial_queue(wiki)
     return {"batches": calls, "merge_calls": merge_calls, "extracted_facts": extracted, "review_or_refused": refused,
             "staged_pages": _count_state(db, "staged"), "applied_pages": applied,
             "review_posts": _count_posts(db, "review"), "queued_posts": _count_posts(db, "queued")}

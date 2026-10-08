@@ -50,7 +50,11 @@ function sourceLabel(url: string, details?: SourceDetails, citation?: string, fa
     (/опубл\.\s*\d{4}-\d{2}-\d{2}\s*[—–-]\s*([^;`)]+)/i.exec(citation ?? '')?.[1]?.trim()) ||
     (fallback && !/wall-?\d+_\d+|archive:|group:|https?:/i.test(fallback) ? fallback : '')
   const group = details?.group_name?.trim() || details?.group?.trim() || (url.startsWith('/api/v1/wiki/source?ref=') ? 'Архив Штаба' : humanizeDomain(/vk\.com\/([^/?#]+)/i.exec(url)?.[1] ?? 'Сообщество ВКонтакте'))
-  const date = details?.published_at?.slice(0, 10) || PUB_DATE.exec(citation ?? '')?.[1]
+  const rawDate = details?.published_at?.slice(0, 10) || PUB_DATE.exec(citation ?? '')?.[1]
+  const parsedDate = rawDate ? new Date(rawDate) : null
+  const date = parsedDate && Number.isFinite(parsedDate.getTime())
+    ? parsedDate.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
+    : rawDate
   return [topic || 'Публикация', group, date].filter(Boolean).join(' · ')
 }
 
