@@ -177,6 +177,7 @@ def relevant_page_catalog(wiki: Path, query: str, limit: int = 5) -> list[dict[s
         except (OSError, UnicodeError):
             continue
         if re.search(r"(?m)^status:\s*['\"]?stub['\"]?\s*$", content): continue
+        if re.search(r"(?m)^redirect_to:\s*", content): continue
         slug = str(path.relative_to(wiki).with_suffix(""))
         title_match = re.search(r"(?m)^#\s+(.+)$", content)
         title = title_match.group(1).strip() if title_match else path.stem

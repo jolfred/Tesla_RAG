@@ -98,6 +98,7 @@ SYSTEM = (
 _SLUG_RE = re.compile(r"^[a-z0-9_/]+$")
 _TITLE_RE = re.compile(r"(?m)^# (.+?)\s*$")
 _KIND_RE = re.compile(r"(?m)^kind:\s*(\S+)\s*$")
+_REDIRECT_RE = re.compile(r"(?m)^redirect_to:\s*([a-z0-9_/]+)\s*$")
 _LINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 _MD_URL_RE = re.compile(r"\[[^\]]*\]\(((?:https://|/api/v1/wiki/source\?)[^)]+)\)")
 _SKIP = {"AGENTS.md", "log.md"}
@@ -133,21 +134,29 @@ def page_meta(slug: str, path: Path) -> dict:
     k = _KIND_RE.search(text)
     title = (m.group(1).strip() if m else slug)[:120]
     kind = k.group(1).strip() if k else (slug.split("/")[0] if "/" in slug else "wiki")
-    return {"slug": slug, "title": title, "kind": kind}
+    meta = {"slug": slug, "title": title, "kind": kind}
+    redirect = _REDIRECT_RE.search(text)
+    if redirect:
+        meta["redirect_to"] = redirect[1]
+    return meta
 
 
 def wiki_graph() -> dict:
     """Узлы — страницы, рёбра — [[ссылки]] на существующие страницы."""
     pages = _pages()
-    nodes = [page_meta(s, p) for s, p in sorted(pages.items())]
+    metadata = {s: page_meta(s, p) for s, p in sorted(pages.items())}
+    nodes = [meta for meta in metadata.values() if "redirect_to" not in meta]
     seen: set[tuple[str, str]] = set()
     edges = []
     for slug, path in pages.items():
+        if "redirect_to" in metadata[slug]:
+            continue
         try:
             text = public_markdown(path.read_text(encoding="utf-8"))
         except OSError:
             continue
         for target in set(_LINK_RE.findall(text)):
+            target = metadata.get(target, {}).get("redirect_to", target)
             if target in pages and target != slug and (slug, target) not in seen:
                 seen.add((slug, target))
                 edges.append({"source": slug, "target": target})
@@ -193,6 +202,8 @@ def wiki_search(query: str, top_k: int = 5) -> dict:
             text = public_markdown(path.read_text(encoding="utf-8"))
         except OSError:
             continue
+        if _REDIRECT_RE.search(text):
+            continue
         page_title = page_meta(slug, path)["title"].lower().replace("ё", "е")
         identity = sum(1 for t in toks if not t.isdigit() and t in page_title)
         for title, body in _sections(text):
@@ -231,6 +242,16 @@ def wiki_read(slug: str, section: str = "", offset: int = 0, *, full: bool = Fal
     if WIKI_DIR.resolve() not in path.parents or slug not in _pages():
         return {"status": "fail", "error": "not found"}
     text = public_markdown(path.read_text(encoding="utf-8"))
+    redirect = _REDIRECT_RE.search(text)
+    if redirect:
+        target = redirect[1]
+        pages = _pages()
+        if target == slug or target not in pages:
+            return {"status": "fail", "error": "invalid redirect"}
+        target_text = public_markdown(pages[target].read_text(encoding="utf-8"))
+        if _REDIRECT_RE.search(target_text):
+            return {"status": "fail", "error": "redirect chain"}
+        slug, text = target, target_text
     if section:
         want = section.strip().lower()
         for title, body in _sections(text):

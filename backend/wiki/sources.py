@@ -63,6 +63,9 @@ def build_source_index(posts_dir: Path | None = None) -> dict[str, dict]:
 def source_index(wiki_dir: Path) -> dict[str, dict]:
     bibliography = wiki_dir / "_sources.json"
     paths = [bibliography] if bibliography.exists() else sorted((ROOT / "storage" / "posts").glob("posts_*.jsonl")) + sorted((ROOT / "storage" / "groups").glob("groups_*.json"))
+    registry = wiki_dir / "_source_records.json"
+    if registry.exists():
+        paths.append(registry)
     signature = tuple((str(p), p.stat().st_mtime_ns, p.stat().st_size) for p in paths)
     key = str(wiki_dir.resolve())
     if _cache.get(key, (None,))[0] != signature:
@@ -75,6 +78,9 @@ def source_index(wiki_dir: Path) -> dict[str, dict]:
                 index = {}
         else:
             index = build_source_index()
+        from backend.wiki.archive import read_records
+        for record in read_records(wiki_dir).values():
+            index[source_key(record["url"])] = {k: record.get(k, "") for k in ("url", "title", "group_name", "published_at")}
         _cache[key] = (signature, index)
     return _cache[key][1]
 
