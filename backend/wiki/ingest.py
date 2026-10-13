@@ -224,6 +224,12 @@ def validate_post_result(result: dict[str, Any], known: dict[tuple[str, str], st
     outcome = result.get("outcome", "extracted")
     if outcome in ("refused", "error"):
         return []
+    # Some free models put "noise" in outcome despite returning noise-class items.
+    # Treat only that unambiguous shape as an empty/non-wiki extraction.
+    if (outcome == "noise" and isinstance(result.get("items"), list)
+            and all(isinstance(item, dict) and item.get("class") == "noise"
+                    for item in result["items"])):
+        outcome = "extracted"
     if outcome != "extracted" or not isinstance(result.get("items"), list):
         raise ValueError(f"{pid}: outcome must be extracted/refused/error with items array")
     validated = []
