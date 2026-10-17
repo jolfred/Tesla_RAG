@@ -35,6 +35,32 @@ def _atomic_json(path: Path, payload: Any) -> None:
     tmp.replace(path)
 
 
+def _active_prompt_file(prompt_path: Path, key: str, run_dir: Path) -> Path:
+    """Use the admin override only for registered default prompt paths.
+
+    Explicit custom prompt paths remain supported for isolated/manual runs.
+    The active editable text and the two live canonical files are composed by
+    the same registry used by query-time prompts.
+    """
+    from backend.admin import prompts
+    expected = Path(prompts._schema_dir() / "prompts" / prompts.FILES[key]).resolve()
+    if Path(prompt_path).resolve() == expected:
+        composed = prompts.compose(key)
+    else:
+        # Preserve explicitly supplied prompt files while still appending the
+        # current immutable canon if they do not already contain it.
+        composed = Path(prompt_path).read_text(encoding="utf-8")
+        canon = prompts.canonical_sections()
+        if not all(section["text"] in composed for section in canon):
+            composed = composed.rstrip() + "\n\n" + prompts.CANON_MARKER + "\n\n" + "\n\n".join(section["text"] for section in canon)
+    digest = __import__("hashlib").sha256(composed.encode("utf-8")).hexdigest()[:16]
+    target = run_dir / "effective-prompts" / f"{key}-{digest}.md"
+    if not target.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(composed, encoding="utf-8")
+    return target
+
+
 def _merge_rows(db: Path, wiki: Path, run_dir: Path, rows: list[Any], merge_prompt: Path,
                 model: str, fallbacks: tuple[str, ...], codex_fallback: bool,
                 agent: str, do_apply: bool) -> tuple[int, int]:
@@ -238,7 +264,10 @@ def call_provider(provider: str, effort: str, system_prompt: Path, bundle_path: 
     workdir.mkdir(parents=True, exist_ok=True); output_path.parent.mkdir(parents=True, exist_ok=True)
     prompt = system_prompt.read_text(encoding="utf-8")
     editorial_skill = Path(__file__).resolve().parents[2] / ".opencode/skills/wiki-editorial/SKILL.md"
-    prompt += "\n\n--- EDITORIAL SKILL ---\n\n" + editorial_skill.read_text(encoding="utf-8")
+    skill_text = editorial_skill.read_text(encoding="utf-8")
+    skill_block = "--- EDITORIAL SKILL ---\n\n" + skill_text
+    if skill_block not in prompt:
+        prompt += "\n\n" + skill_block
     _validate_canonical_prompt(prompt)
     if provider == "codex":
         selected_model = model or "gpt-6-luna"
@@ -313,6 +342,8 @@ def compile_wiki(db: Path, wiki: Path, run_dir: Path,
     if not do_apply and max_posts > batch_size:
         raise ValueError("multi-batch compile requires --apply to preserve accumulated page proposals")
     run_dir.mkdir(parents=True, exist_ok=True)
+    extract_prompt = _active_prompt_file(extract_prompt, "wiki_extract", run_dir)
+    merge_prompt = _active_prompt_file(merge_prompt, "wiki_merge", run_dir)
     queue = export_posts(db, min(batch_size, max_posts), state="queued", max_chars=char_budget)
     # Continue through the queue, preserving per-batch inputs and outputs.
     extracted = refused = calls = processed = merge_calls = applied = 0
@@ -327,7 +358,8 @@ def compile_wiki(db: Path, wiki: Path, run_dir: Path,
         calls += 1
         queue = queue[:min(batch_size, max_posts - processed)]
         processed += len(queue)
-        batch_identity = "\n".join(x["post_id"] + ":" + x["source_hash"] for x in queue)
+        batch_identity = ("\n".join(x["post_id"] + ":" + x["source_hash"] for x in queue)
+                          + "\n" + extract_prompt.read_text(encoding="utf-8"))
         batch_key = __import__("hashlib").sha256(batch_identity.encode()).hexdigest()[:16]
         batch_dir = run_dir / f"batch-{batch_key}"; batch_dir.mkdir(parents=True, exist_ok=True)
         bundle_posts = [{"post_id": post["post_id"], "source_hash": post["source_hash"],

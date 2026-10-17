@@ -1,8 +1,9 @@
 # Slim-зависимости Wiki API для будущего сервера.
 # Здесь НЕТ: torch/transformers/sentence-transformers (эмбеддинги не нужны —
 # wiki-путь читает md + GigaChat; model.py импортирует их лениво),
-# langchain-* (рантайм их не импортирует), pdfplumber/python-docx/Pillow/pymorphy3
-# (нужны только индексатору/скраперу, на ВМ не запускаются).
+# langchain-* (рантайм их не импортирует), pymorphy3.
+# Кабинет использует pdfplumber/python-docx для документов и vk-api для
+# ручного/запланированного сбора источников; графовые сервисы не нужны.
 # Если `python -c "import backend.main"` ругнётся на отсутствие пакета —
 # добавить его сюда же.
 fastapi>=0.115.0
@@ -13,3 +14,6 @@ httpx>=0.27.0
 openai>=1.0.0
 langfuse==4.15.3
 python-multipart>=0.0.9
+pdfplumber>=0.11.0
+python-docx>=1.1.0
+vk-api>=11.9.9

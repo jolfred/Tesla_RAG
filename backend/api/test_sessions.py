@@ -15,7 +15,7 @@ def store(tmp_path):
 def test_create_stores_hash_not_token(store, tmp_path):
     created = store.create("user")
     assert created["token"]
-    assert created["role"] == "admin"  # TEMP(ALL_ADMIN): откатить на "user"
+    assert created["role"] == "user"
     assert created["expires_at"]
 
     import sqlite3
@@ -38,7 +38,7 @@ def test_verify_valid_token(store):
     created = store.create("user")
     session = store.verify(created["token"])
     assert session is not None
-    assert session["role"] == "admin"  # TEMP(ALL_ADMIN): откатить на "user"
+    assert session["role"] == "user"
 
 
 def test_verify_invalid_token_returns_none(store):
@@ -91,3 +91,52 @@ def test_verify_deletes_expired_row_on_hit(tmp_path):
     conn.close()
     assert count == 0
     s.close()
+
+
+def test_legacy_debug_admin_sessions_are_downgraded_and_new_roles_survive_restart(tmp_path, monkeypatch):
+    import sqlite3
+
+    import backend.api.sessions as sessions_module
+
+    db_path = tmp_path / "legacy-sessions.db"
+    now = datetime.now(timezone.utc)
+    expires = (now + timedelta(days=30)).isoformat()
+    legacy_admin_token = "old-debug-admin-token"
+    legacy_user_token = "old-user-token"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE sessions (token_hash TEXT PRIMARY KEY, role TEXT NOT NULL, vk_user_id TEXT, "
+        "created_at TEXT NOT NULL, expires_at TEXT NOT NULL)"
+    )
+    conn.executemany(
+        "INSERT INTO sessions(token_hash,role,vk_user_id,created_at,expires_at) VALUES(?,?,?,?,?)",
+        [
+            (hash_token(legacy_admin_token), "admin", None, now.isoformat(), expires),
+            (hash_token(legacy_user_token), "user", None, now.isoformat(), expires),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(sessions_module, "TESLA_ALL_ADMIN", True)
+    migrated = SessionStore(db_path=str(db_path), ttl_days=30)
+    assert migrated.verify(legacy_admin_token)["role"] == "user"
+    assert migrated.verify(legacy_user_token)["role"] == "user"
+
+    new_guest = migrated.create("user")
+    new_admin = migrated.create("admin")
+    assert new_guest["role"] == "user"
+    assert new_admin["role"] == "admin"
+    migrated.close()
+
+    restarted = SessionStore(db_path=str(db_path), ttl_days=30)
+    assert restarted.verify(legacy_admin_token)["role"] == "user"
+    assert restarted.verify(new_guest["token"])["role"] == "user"
+    assert restarted.verify(new_admin["token"])["role"] == "admin"
+    auth_sources = {
+        row["token_hash"]: row["auth_source"]
+        for row in restarted._conn.execute("SELECT token_hash,auth_source FROM sessions")
+    }
+    assert auth_sources[hash_token(new_guest["token"])] == "guest"
+    assert auth_sources[hash_token(new_admin["token"])] == "admin_key"
+    restarted.close()

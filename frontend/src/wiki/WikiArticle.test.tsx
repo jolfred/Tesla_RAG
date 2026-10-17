@@ -64,7 +64,7 @@ describe('WikiArticle', () => {
     expect(screen.queryByText(/posts_spoyunost2020/)).toBeNull()
     // примечания — понятная подпись с группой и датой
     expect(screen.getByText('Примечания')).toBeTruthy()
-    const ref = screen.getByRole('link', { name: 'Публикация · СПО «Юность» · 2021-04-07' })
+    const ref = screen.getByRole('link', { name: 'Публикация · СПО «Юность» · 7 апреля 2021 г.' })
     expect(ref.getAttribute('href')).toBe('https://vk.com/spoyunost2020?w=wall-198864697_133')
     expect(screen.getAllByRole('link', { name: '← Все статьи' })).toHaveLength(2)
   })
@@ -73,7 +73,7 @@ describe('WikiArticle', () => {
     mockFetch({ ...ARTICLE, source_details: [{ url: ARTICLE.sources[0], title: 'Посвящение в бойцы', group_name: 'СПО «Юность»', published_at: '2021-04-07' }] })
     render(<WikiArticle slug="lso/spo_yunost" />)
     await screen.findByRole('heading', { name: 'СПО «Юность»' })
-    expect(screen.getByRole('link', { name: 'Посвящение в бойцы · СПО «Юность» · 2021-04-07' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Посвящение в бойцы · СПО «Юность» · 7 апреля 2021 г.' })).toBeTruthy()
     expect(screen.getByText('Отряды')).toBeTruthy()
   })
 
@@ -104,7 +104,7 @@ describe('WikiArticle', () => {
     expect(screen.queryByText(/^raw нет$/)).toBeNull()
     expect(screen.queryByText(/^status: stub$/)).toBeNull()
     expect(screen.getAllByRole('link', { name: '[1]' })).toHaveLength(2)
-    expect(screen.getByRole('link', { name: 'Публикация · СПО «Юность» · 2021-04-07' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Публикация · СПО «Юность» · 7 апреля 2021 г.' })).toBeTruthy()
   })
 
   it('упоминание персоны без [[ ]] само становится ссылкой на вики', async () => {

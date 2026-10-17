@@ -10,6 +10,7 @@ from urllib.parse import quote
 ARCHIVE_ID = re.compile(r"^archive:(chronicle_part_\d{3}\.txt):L(\d+)-L(\d+)$")
 GROUP_ID = re.compile(r"^group:([a-z0-9_]+)$")
 CURATOR_ID = re.compile(r"^curator:\d{4}-\d{2}-\d{2}:[a-z0-9_-]+$")
+DOCUMENT_ID = re.compile(r"^document:[a-z0-9-]+:[a-f0-9]{16}:L[1-9]\d*-L[1-9]\d*$")
 EXCLUDED = {"kgeu_official", "spoyunost"}
 
 
@@ -90,7 +91,7 @@ def register_records(wiki: Path, sources: list[dict], documents: Path, groups: P
 
 
 def source_text(ref: str, wiki: Path) -> str | None:
-    if not (ARCHIVE_ID.fullmatch(ref) or CURATOR_ID.fullmatch(ref)):
+    if not (ARCHIVE_ID.fullmatch(ref) or CURATOR_ID.fullmatch(ref) or DOCUMENT_ID.fullmatch(ref)):
         return None
     record = read_records(wiki).get(ref)
     if not record:

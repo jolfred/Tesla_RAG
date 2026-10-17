@@ -11,7 +11,7 @@ STORAGE_DIR = BASE_DIR / "storage"
 DOCUMENTS_DIR = STORAGE_DIR / "documents"
 IMAGES_DIR = STORAGE_DIR / "images"
 SCHEMA_DIR = BASE_DIR / "schema"
-SESSIONS_DB = STORAGE_DIR / "sessions.db"
+SESSIONS_DB = Path(os.getenv("TESLA_SESSIONS_DB", "") or (STORAGE_DIR / "sessions.db"))
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
 
 for p in [DOCUMENTS_DIR, IMAGES_DIR]:
@@ -74,8 +74,8 @@ SESSION_TTL = int(os.getenv("SESSION_TTL", "30"))  # суток
 # True = создан на базе Штаба, формулировки "проектный центр Штаба" допустимы;
 # при этом это НЕ отряд — в список units из карточки rso_tesla не входит.
 PROGRESSLAB_IS_SUBORDINATE = os.getenv("PROGRESSLAB_IS_SUBORDINATE", "1") == "1"
-# TEMP(ALL_ADMIN): пока все новые сессии — админские (панель «Рентген» без
-# отдельного admin-входа). ОТКАТИТЬ перед продакшеном: удалить из .env + тесты.
+# Legacy debug flag is only used to migrate old elevated guest sessions.
+# It no longer grants administrative access to new guests.
 TESLA_ALL_ADMIN = os.getenv("TESLA_ALL_ADMIN", "") == "1"
 VK_APP_ID = os.getenv("VK_APP_ID", "")
 VK_APP_SECRET = os.getenv("VK_APP_SECRET", "")

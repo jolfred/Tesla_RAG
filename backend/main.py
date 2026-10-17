@@ -1,18 +1,39 @@
+from contextlib import asynccontextmanager
+import os
+
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from backend.api.auth import verify_user
-from backend.api.routes import admin, auth, chat, documents, status, wiki
+from backend.api.routes import admin, auth, chat, documents, editorial, operations, prompt_history, status, wiki
 from backend.config import FRONTEND_DIST
 from backend.utils.logger import setup_logger
 
 logger = setup_logger("api")
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # This worker only collects sources explicitly queued in the cabinet.
+    # Schedules default off. It cannot invoke an LLM or publish Wiki pages.
+    enabled = os.getenv("TESLA_OPERATIONS_WORKER", "1") == "1"
+    if enabled:
+        from backend.admin.operations import start_operations_worker
+        start_operations_worker()
+    try:
+        yield
+    finally:
+        if enabled:
+            from backend.admin.operations import stop_operations_worker
+            stop_operations_worker()
+
+
 app = FastAPI(
     title="Летопись — Штаб Тесла",
     description="Wiki API цифровой летописи Штаба СО КГЭУ «Тесла»",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -35,6 +56,9 @@ app.include_router(chat.router, tags=["chat"])
 from backend.api.auth import verify_admin, verify_admin_session
 # Админка-сайт (/admin): только Bearer admin-сессия, без X-API-Key.
 app.include_router(admin.router, dependencies=[Depends(verify_admin_session)], tags=["admin"])
+app.include_router(editorial.router, tags=["editorial"])
+app.include_router(operations.router, tags=["admin-operations"])
+app.include_router(prompt_history.router, tags=["admin-prompts"])
 app.include_router(documents.router, dependencies=[Depends(verify_admin)], tags=["documents"])
 
 # Frontend: статические ассеты (FR-2.2)

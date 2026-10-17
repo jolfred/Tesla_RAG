@@ -53,26 +53,34 @@ class SessionStore:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)"
             )
+            columns = {r[1] for r in self._conn.execute("PRAGMA table_info(sessions)")}
+            if "auth_source" not in columns:
+                self._conn.execute("ALTER TABLE sessions ADD COLUMN auth_source TEXT NOT NULL DEFAULT 'legacy'")
+                if TESLA_ALL_ADMIN:
+                    # Earlier debug-mode sessions cannot prove an admin login.
+                    # Keep them usable as readers and require a fresh admin
+                    # login before allowing changes in the cabinet.
+                    self._conn.execute("UPDATE sessions SET role='user' WHERE role='admin'")
             self._conn.commit()
 
     def create(self, role: str = "user", vk_user_id: Optional[str] = None) -> dict:
         """Создаёт сессию, возвращает {token, role, vk_user_id, expires_at}."""
-        # TEMP(ALL_ADMIN): все новые сессии админские. Откатить вместе с флагом.
-        if TESLA_ALL_ADMIN:
-            role = "admin"
+        if role not in {"user", "admin"}:
+            raise ValueError("Invalid session role")
         token = secrets.token_urlsafe(32)
         now = _utcnow()
         expires = now + timedelta(days=self.ttl_days)
         with self._lock:
             self._conn.execute(
-                "INSERT INTO sessions (token_hash, role, vk_user_id, created_at, expires_at) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO sessions (token_hash, role, vk_user_id, created_at, expires_at, auth_source) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     hash_token(token),
                     role,
                     vk_user_id,
                     now.isoformat(),
                     expires.isoformat(),
+                    "vk" if vk_user_id else ("admin_key" if role == "admin" else "guest"),
                 ),
             )
             self._conn.commit()

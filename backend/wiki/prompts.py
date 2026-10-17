@@ -13,4 +13,4 @@ def canon_text() -> str:
 
 def query_prompt() -> str:
     from backend.admin.prompts import get_prompt
-    return get_prompt("wiki_query") + "\n\n" + canon_text()
+    return get_prompt("wiki_query")

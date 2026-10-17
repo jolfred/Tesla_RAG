@@ -16,7 +16,7 @@ describe('extractFootnotes', () => {
       'избран Егор (Источник: ([wall-198864697_133](https://vk.com/spoyunost2020?w=wall-198864697_133)), опубл. 2021-04-07, событие 2021-04-07).',
     )
     expect(text).toBe('избран Егор [1](#ref-1-1).')
-    expect(refs[0]).toMatchObject({ n: 1, url: 'https://vk.com/spoyunost2020?w=wall-198864697_133', label: 'Публикация · СПО «Юность» · 2021-04-07' })
+    expect(refs[0]).toMatchObject({ n: 1, url: 'https://vk.com/spoyunost2020?w=wall-198864697_133', label: 'Публикация · СПО «Юность» · 7 апреля 2021 г.' })
   })
 
   it('повтор того же поста — тот же номер, wall-ID нигде в тексте', () => {
@@ -32,13 +32,13 @@ describe('extractFootnotes', () => {
   it('использует название, группу и дату из метаданных источника', () => {
     const url = 'https://vk.com/spoyunost2020?w=wall-1_2'
     const { refs } = extractFootnotes('(Источник: ([wall-1_2](' + url + ')), опубл. 2022-01-01).', [{ url, title: 'Открытие сезона', group: 'СПО «Юность»', published_at: '2022-01-02T00:00:00Z' }])
-    expect(refs[0].label).toBe('Открытие сезона · СПО «Юность» · 2022-01-02')
+    expect(refs[0].label).toBe('Открытие сезона · СПО «Юность» · 2 января 2022 г.')
   })
 
   it('распознаёт старую цитату, обёрнутую в inline code', () => {
     const { text, refs } = extractFootnotes('Событие `([wall-1_2](https://vk.com/rso_tesla?w=wall-1_2)), опубл. 2020-01-01 — Открытие сезона`')
     expect(text).toContain('[1](#ref-1-1)')
-    expect(refs[0].label).toBe('Открытие сезона · Штаб «Тесла» · 2020-01-01')
+    expect(refs[0].label).toBe('Открытие сезона · Штаб «Тесла» · 1 января 2020 г.')
   })
 
   it('цитата без URL и обычный текст — как есть', () => {

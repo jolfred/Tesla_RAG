@@ -77,14 +77,14 @@ def test_guest_flow():
     resp = client.post("/api/v1/auth/guest")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["role"] == "admin"  # TEMP(ALL_ADMIN): откатить на "user"
+    assert data["role"] == "user"
     assert data["token"]
     assert data["expires_at"]
 
     me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {data['token']}"})
     assert me.status_code == 200
     me_data = me.json()
-    assert me_data["role"] == "admin"  # TEMP(ALL_ADMIN): откатить на "user"
+    assert me_data["role"] == "user"
     assert me_data["vk_user_id"] is None
     assert me_data["expires_at"] == data["expires_at"]
 
@@ -164,13 +164,13 @@ def test_chat_without_credentials_401(mock_searcher):
 
 
 def test_chat_context_admin_only(mock_searcher):
-    # Панель «Рентген»: Bearer-админ + флаг -> 3 окна вызовов.
-    # (TEMP(ALL_ADMIN): гость сейчас админ; после отката брать admin-вход.)
+    # Контекст доступен только с полноценной admin-сессией.
     guest = client.post("/api/v1/auth/guest").json()
+    admin = client.post("/api/v1/auth/admin", json={"api_key": ADMIN_KEY}).json()
     resp = client.post(
         "/api/v1/chat",
         json={"question": "Тест", "include_context": True},
-        headers={"Authorization": f"Bearer {guest['token']}"},
+        headers={"Authorization": f"Bearer {admin['token']}"},
     )
     assert resp.status_code == 200
     calls = resp.json()["calls"]
@@ -187,13 +187,30 @@ def test_chat_context_admin_only(mock_searcher):
     )
     assert resp.status_code == 200
     assert resp.json()["calls"] is None
+    # Bearer-гость также не получает внутренний контекст.
+    resp = client.post(
+        "/api/v1/chat",
+        json={"question": "Тест", "include_context": True},
+        headers={"Authorization": f"Bearer {guest['token']}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["calls"] is None
     # Без флага -> окон нет даже у админа.
     resp = client.post(
         "/api/v1/chat",
         json={"question": "Тест"},
-        headers={"Authorization": f"Bearer {guest['token']}"},
+        headers={"Authorization": f"Bearer {admin['token']}"},
     )
     assert resp.json()["calls"] is None
+
+
+def test_guest_cannot_access_editorial_cabinet():
+    guest = client.post("/api/v1/auth/guest").json()
+    resp = client.get(
+        "/api/v1/editorial/articles",
+        headers={"Authorization": f"Bearer {guest['token']}"},
+    )
+    assert resp.status_code == 403
 
 
 # --- A-7: VK sign ---
@@ -212,7 +229,7 @@ def test_vk_sign_correct_user_not_in_allowlist(monkeypatch):
     sign = "e508559584c372658ffbb9e5daeda707ffb00dbc2efee6b620ac2c7f9a7a445a"
     resp = client.post("/api/v1/auth/vk", json={"params": params, "sign": sign})
     assert resp.status_code == 200
-    assert resp.json()["role"] == "admin"  # TEMP(ALL_ADMIN): откатить на "user"
+    assert resp.json()["role"] == "user"
 
 
 def test_vk_sign_forged_params_401():
