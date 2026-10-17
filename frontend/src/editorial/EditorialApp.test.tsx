@@ -19,7 +19,7 @@ describe('EditorialApp', () => {
       const url = String(input);
       if (url.endsWith('/api/v1/auth/me')) return response({ role: 'admin', vk_user_id: null, expires_at: '' });
       if (url.includes('/api/v1/editorial/articles')) return response({ articles: [{ slug: 'hq/index', title: 'Штаб СО КГЭУ «Тесла»', kind: 'hq', revision: 'abc123456789', status: 'published', has_draft: false, updated_at: '' }] });
-      if (url.includes('/api/v1/editorial/article?')) { articleReads += 1; return response({ slug: 'hq/index', title: 'Штаб СО КГЭУ «Тесла»', markdown: '# Статья\n\nТекст.', revision: 'abc123456789', sources: [{ url: 'https://vk.com/example', title: 'Публикация', group_name: 'Штаб', published_at: '2026-01-02' }], draft: null }); }
+      if (url.includes('/api/v1/editorial/article?')) { articleReads += 1; return response({ slug: 'hq/index', title: 'Штаб СО КГЭУ «Тесла»', markdown: '# Статья\n\n| Роль | Статья |\n| --- | --- |\n| Командир | [[people/example|Алексей]] |', revision: 'abc123456789', sources: [{ url: 'https://vk.com/example', title: 'Публикация', group_name: 'Штаб', published_at: '2026-01-02' }], draft: null }); }
       if (url.endsWith('/api/v1/editorial/draft')) return draftConflict ? response({ detail: 'stale revision' }, 409) : response({ ok: true, draft: { markdown: '# Черновик\n\nИзменение.', base_revision: 'abc123456789', revision: 'draft123456', updated_at: '' } });
       if (url.endsWith('/api/v1/editorial/publish')) return response({ ok: true, slug: 'hq/index', revision: 'published123' });
       if (url.includes('/api/v1/editorial/discussions')) return response({ discussions: [] });
@@ -33,6 +33,9 @@ describe('EditorialApp', () => {
     render(<AuthProvider><EditorialApp /></AuthProvider>);
     expect(await screen.findByRole('heading', { name: 'Штаб СО КГЭУ «Тесла»' })).toBeTruthy();
     expect(await screen.findByText('Публикация')).toBeTruthy();
+    const wikiLink = await screen.findByRole('link', { name: 'Алексей' });
+    expect(wikiLink.getAttribute('href')).toBe('/wiki/people/example');
+    expect(wikiLink.closest('tr')?.querySelectorAll('td')).toHaveLength(2);
     fireEvent.click(screen.getByRole('button', { name: 'Редактировать' }));
     fireEvent.change(screen.getByLabelText('Текст статьи в Markdown'), { target: { value: '# Черновик\n\nИзменение.' } });
     fireEvent.change(screen.getByLabelText('Причина изменения'), { target: { value: 'Исправлена формулировка' } });

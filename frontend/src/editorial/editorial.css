@@ -6,3 +6,7 @@
 .editorial-create-article{display:grid;gap:6px;padding:8px 0 12px;border-bottom:1px solid var(--e-line)}.editorial-create-article input{width:100%}.editorial-create-article button{font:inherit;border:1px solid var(--e-line);border-radius:7px;padding:8px 10px;background:var(--e-panel);color:var(--e-text);cursor:pointer}.editorial-create-article button.primary{background:var(--e-accent);color:var(--e-accent-text)}
 @media(prefers-color-scheme:dark){.editorial-body{background:#fdfcff;color:#24172f;padding:16px;border-radius:8px}}
 .editorial-conflict{border:1px solid #b85a49;background:color-mix(in srgb,#b85a49 10%,var(--e-panel));border-radius:9px;padding:14px;margin:14px 0}.editorial-conflict p{margin:6px 0}.editorial-conflict button{font:inherit;border:1px solid var(--e-line);border-radius:7px;padding:8px 11px;background:var(--e-panel);color:var(--e-text);cursor:pointer}
+
+/* Keep long article lists scrollable without pushing the editor off screen. */
+.editorial-list{max-height:calc(100vh - 140px);overflow-y:auto;align-self:start}
+@media(max-width:900px){.editorial-list{max-height:45vh}}
