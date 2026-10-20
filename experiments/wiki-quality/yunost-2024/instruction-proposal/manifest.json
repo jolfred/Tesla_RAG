@@ -1,0 +1,12 @@
+{
+  "rules.md": {
+    "original_normalized_sha256": "ae41289e3203cb08f80ddddfe68a59bf8c1de72c974c2c293300af4a559f737d",
+    "proposed_sha256": "941cd0ebb072bd9673737a47d31fdcf1126f100fd6ffc171465d3edcfce249e7",
+    "status": "proposal_not_applied_not_approved"
+  },
+  "rules_mapping.md": {
+    "original_normalized_sha256": "1d85b2611f6745d03ff98244a40ad69b86c6577ff187581d8bf6ed9dd694e9a1",
+    "proposed_sha256": "06fc34cf959bfa4fd6d85a20faf0f31fc0078d8fef6043d56fdf5afb9541f596",
+    "status": "proposal_not_applied_not_approved"
+  }
+}
