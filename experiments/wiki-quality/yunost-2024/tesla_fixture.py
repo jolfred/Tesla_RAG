@@ -1,4 +1,4 @@
-"""Run the pinned native compiler with a fake Responses client; no network/LLM.
+"""Run the pinned compiler with fake responses, or explicitly --subscription.
 
 The complete two-stage path creates a page from empty state and then updates it
 with insert_after. Production modules are imported from a private Git archive.
@@ -24,6 +24,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path, help="New directory under storage/experiments/yunost-2024")
     parser.add_argument("--native-archive", type=Path, help="Already frozen git archive; useful on an isolated Linux runner")
+    parser.add_argument("--subscription", action="store_true", help="Linux only: real Codex CLI / ChatGPT subscription, synthetic input")
+    parser.add_argument("--canon-dir", type=Path, help="Research-only canon copy with no historical examples")
     args = parser.parse_args()
     folder = args.output.resolve()
     private = (prepare.ROOT / "storage/experiments/yunost-2024").resolve()
@@ -43,6 +45,9 @@ def main():
         if handle.pax_headers.get("comment") != config["tesla_commit"]:
             raise ValueError("Archive Git commit does not match the protocol")
         handle.extractall(project, filter="data")
+    if args.canon_dir:
+        for name in ("rules.md", "rules_mapping.md"):
+            shutil.copyfile(args.canon_dir / name, project / "schema" / name)
     os.environ["PYTHON_DOTENV_DISABLED"] = "1"
     os.environ["LANGFUSE_ENABLED"] = "0"
     os.environ["TESLA_ADMIN_DB"] = str(folder / "unused-admin.db")
@@ -88,15 +93,24 @@ def main():
         return types.SimpleNamespace(status="completed", output_text=payload["output_text"], model_dump=lambda **kwargs: payload)
 
     client = types.SimpleNamespace(max_retries=0, responses=types.SimpleNamespace(create=create))
-    compiler.call_provider_resilient = make_provider(client, compiler, folder / "calls")
+    if args.subscription:
+        if os.name == "nt":
+            raise ValueError("Native subscription compiler fixture requires Linux (fcntl and LF)")
+        from tesla_codex_transport import make_provider as codex_provider
+        compiler.call_provider_resilient = codex_provider(compiler)
+    else:
+        compiler.call_provider_resilient = make_provider(client, compiler, folder / "calls")
     prompts = prepare.prompt_snapshot(project)
     for key, p in prompts["stages"].items():
         (folder / (key + ".md")).write_text(p["effective"], encoding="utf-8")
     db, wiki = folder / "ledger.sqlite", folder / "wiki"
     wiki.mkdir()
     summaries = []
-    for index, body in enumerate(("5 января 2024 года прошёл первый синтетический тренинг.",
-                                  "10 февраля 2024 года прошёл второй синтетический тренинг."), 1):
+    bodies = (("5 января 2024 года вымышленный отряд «Проба» провёл учебную встречу «Январский маяк».",
+               "10 февраля 2024 года вымышленный отряд «Проба» провёл учебную встречу «Февральский флаг».")
+              if args.subscription else ("5 января 2024 года прошёл первый синтетический тренинг.",
+                                          "10 февраля 2024 года прошёл второй синтетический тренинг."))
+    for index, body in enumerate(bodies, 1):
         post = {"post_id": f"wall-1_{index}", "group_id": "1", "group_domain": "synthetic",
                 "group_name": "Synthetic", "published_at": f"2024-0{index}-15T12:00:00Z",
                 "post_url": f"https://vk.com/wall-1_{index}", "text_raw": body, "text_clean": body}
@@ -112,21 +126,27 @@ def main():
                 folder / "wiki_extract.md", folder / "wiki_merge.md", max_posts=50,
                 extract_model="gpt-6-luna", extract_fallback_models=(), merge_model="gpt-6-luna",
                 merge_fallback_models=(), do_apply=True, codex_fallback=False)
-        assert result["applied_pages"] == 1, result
+        if args.subscription:
+            assert result["applied_pages"] >= 1, result
+        else:
+            assert result["applied_pages"] == 1, result
         assert result["queued_posts"] == 0, result
         summaries.append(result)
-    content = (wiki / "lso/synthetic.md").read_text(encoding="utf-8")
-    assert "первый синтетический" in content and "второй синтетический" in content
-    assert len(requests) == 4, len(requests)
-    report = {"status": "passed", "llm_calls": 0, "fake_responses": len(requests),
+    content = "\n".join(p.read_text(encoding="utf-8") for p in wiki.rglob("*.md"))
+    markers = ("Январский маяк", "Февральский флаг") if args.subscription else ("первый синтетический", "второй синтетический")
+    assert all(marker in content for marker in markers)
+    if not args.subscription: assert len(requests) == 4, len(requests)
+    report = {"status": "passed", "llm_calls": len(list(folder.rglob("*.cli.log"))) if args.subscription else 0,
+              "fake_responses": len(requests), "subscription": args.subscription, "study_data_used": False,
+              "model": "gpt-6-luna", "effort": "medium", "canon_profile": "research_copy" if args.canon_dir else "original",
               "tesla_commit": config["tesla_commit"], "native_compiler_modified": False,
               "native_archive_sha256": prepare.sha(archive.read_bytes()),
-              "checks": ["empty_wiki_creation", "next_month_insert_after", "old_fact_retained",
+              "checks": ["empty_wiki_creation", "next_month_update" if args.subscription else "next_month_insert_after", "old_fact_retained",
                          "exact_quote_validation", "medium_both_stages", "request_response_logs"],
               "lock_adapter": "filelock around compile_wiki.__wrapped__" if os.name == "nt" else "native fcntl",
               "platform": sys.platform, "summaries": summaries}
     prepare.write_json(folder / "fixture-report.json", report)
-    print(json.dumps({"status": "passed", "llm_calls": 0, "report": str(folder / "fixture-report.json")}))
+    print(json.dumps({"status": "passed", "llm_calls": report["llm_calls"], "report": str(folder / "fixture-report.json")}))
 
 
 if __name__ == "__main__":

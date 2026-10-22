@@ -101,9 +101,9 @@ def allocation(months: list[str], repetitions: int, seed: int) -> list[dict]:
     return [{"pair": index, "repetition": rep, "batch": month, "order": list(order)} for index, ((rep, month), order) in enumerate(zip(pairs, orders), 1)]
 
 
-def prompt_snapshot(root: Path) -> dict:
+def prompt_snapshot(root: Path, canon_dir: Path | None = None) -> dict:
     """Reproduce the existing registry composition using a read-only DB handle."""
-    canon = [(root / "schema" / name).read_text(encoding="utf-8") for name in ("rules.md", "rules_mapping.md")]
+    canon = [((canon_dir or root / "schema") / name).read_text(encoding="utf-8") for name in ("rules.md", "rules_mapping.md")]
     skill = (root / ".opencode/skills/wiki-editorial/SKILL.md").read_text(encoding="utf-8")
     overrides, histories = {}, []
     db = root / "storage/admin.db"
@@ -157,7 +157,7 @@ def review_html(rows: list[dict], config: dict) -> str:
 
 def verify(folder: Path) -> dict:
     checksums = json.loads((folder / "checksums.json").read_text(encoding="utf-8"))
-    actual = {p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file() and p.name != "checksums.json"}
+    actual = {p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file() and p != folder / "checksums.json"}
     if actual != set(checksums):
         raise ValueError("Snapshot file set changed; create a new version instead of editing a freeze")
     for name, digest in checksums.items():
@@ -186,9 +186,20 @@ def freeze(root: Path, vendor: Path, config_path: Path) -> Path:
     rows, originals, exclusions = select_records(source, config)
     if not rows:
         raise ValueError("Empty selected corpus")
-    prompts = prompt_snapshot(root)
-    helper_hashes = {p.name: sha(p.read_bytes()) for p in sorted(HERE.iterdir()) if p.is_file() and p.suffix in {".py", ".json", ".md", ".mjs", ".txt"}}
-    identity = {"config_sha256": sha(config_path.read_bytes()), "source_file_sha256": sha(source.read_bytes()), "prompt_hashes": {k: v["sha256"] for k, v in prompts["stages"].items()}, "preparation_files": helper_hashes}
+    canon_dir = HERE / "instruction-proposal" if config.get("instruction_profile") == "instruction-proposal_research_copy_only" else root / "schema"
+    if canon_dir != root / "schema":
+        proposed = json.loads((canon_dir / "manifest.json").read_text(encoding="utf-8"))
+        for name in ("rules.md", "rules_mapping.md"):
+            if sha((canon_dir / name).read_bytes()) != proposed[name]["proposed_sha256"]:
+                raise ValueError("Research canon differs from the disclosed proposal")
+    prompts = prompt_snapshot(root, canon_dir)
+    helper_hashes = {p.name: sha(p.read_bytes()) for p in sorted(HERE.iterdir()) if p.is_file() and p.suffix in {".py", ".json", ".md", ".mjs", ".txt", ".patch"}}
+    patch_name = config.get("openwiki_compatibility_patch")
+    if patch_name:
+        actual_patch = subprocess.check_output(["git", "-C", str(vendor), "diff", config["openwiki_commit"], "--"])
+        if actual_patch.replace(b"\r\n", b"\n") != (HERE / patch_name).read_bytes().replace(b"\r\n", b"\n"):
+            raise ValueError("OpenWiki modifications do not match the disclosed compatibility patch")
+    identity = {"preparer_git_commit": git(root, "rev-parse", "HEAD"), "config_sha256": sha(config_path.read_bytes()), "source_file_sha256": sha(source.read_bytes()), "prompt_hashes": {k: v["sha256"] for k, v in prompts["stages"].items()}, "preparation_files": helper_hashes}
     snapshot_id = sha(encoded(identity))[:20]
     folder = root / "storage/experiments/yunost-2024/snapshots" / snapshot_id
     if folder.exists():
@@ -223,7 +234,12 @@ def freeze(root: Path, vendor: Path, config_path: Path) -> Path:
         for name in ("rules.md", "rules_mapping.md"):
             path = folder / "prompts/common" / name
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes((root / "schema" / name).read_bytes())
+            path.write_bytes((canon_dir / name).read_bytes())
+        if canon_dir != root / "schema":
+            for name in ("CHANGES.diff", "manifest.json", "README.md"):
+                path = folder / "prompts/research-canon-provenance" / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes((canon_dir / name).read_bytes())
         for path in HERE.iterdir():
             if path.is_file() and path.name in helper_hashes:
                 target = folder / "preparation" / path.name
@@ -250,11 +266,24 @@ def freeze(root: Path, vendor: Path, config_path: Path) -> Path:
             writer.writerow(["post_id", "batch", "source_hash", "reviewed_by", "eligible_facts_or_noise", "notes"])
             writer.writerows([r["record"]["post_id"], r["batch"], r["record"]["source_hash"], "", "", ""] for r in rows)
         write_json(annotations / "gold-schema.json", {"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object", "required": ["fact_id", "claim", "first_available_batch", "evidence", "annotator", "adjudication"], "properties": {"fact_id": {"type": "string", "minLength": 1}, "claim": {"type": "string", "minLength": 1}, "first_available_batch": {"enum": months}, "evidence": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["post_id", "quote"], "properties": {"post_id": {"enum": [r["record"]["post_id"] for r in rows]}, "quote": {"type": "string", "minLength": 1}}}}, "annotator": {"type": "string", "minLength": 1}, "adjudication": {"enum": ["draft", "approved", "excluded"]}}})
-        write_json(folder / "approvals/pending.json", {"snapshot_id": snapshot_id, "materials": "pending", "gold_and_methodology": "pending", "model_transport_and_budget": "pending", "user_instruction_is_not_methodology_approval": True})
+        write_json(folder / "approvals/recorded-scope.json", {"snapshot_id": snapshot_id,
+            "decisions": config.get("generation_approvals", {}),
+            "reference_limitations": config.get("reference_limitations"),
+            "runtime_readiness_is_separate_from_user_authorization": True})
+        if config.get("working_reference"):
+            reference = root / "storage/experiments/yunost-2024" / config["working_reference"]
+            reference_hashes = json.loads((reference / "checksums.json").read_text(encoding="utf-8"))
+            for name, expected in reference_hashes.items():
+                if sha((reference / name).read_bytes()) != expected:
+                    raise ValueError("User-reviewed reference changed after recording")
+                target = annotations / "user-reviewed-reference-v2" / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((reference / name).read_bytes())
+            write_json(annotations / "user-reviewed-reference-v2/checksums.json", reference_hashes)
         for rep in range(1, config["planned_repetitions"] + 1):
             for arm in config["arms"]:
                 (folder / "runs" / f"r{rep:02d}" / arm / "wiki").mkdir(parents=True)
-        manifest = {"snapshot_id": snapshot_id, "created_at_utc": datetime.now(timezone.utc).isoformat(), "study_id": config["study_id"], "source_records": len(rows), "text_characters": sum(len(r["record"]["text_raw"]) for r in rows), "batches": dict(sorted(Counter(r["batch"] for r in rows).items())), "attachments_excluded": dict(Counter({key: sum(r["attachment_counts"].get(key, 0) for r in rows) for key in {k for r in rows for k in r["attachment_counts"]}})), "identity": identity, "tesla_commit": config["tesla_commit"], "openwiki_commit": config["openwiki_commit"], "preparer_git_commit": git(root, "rev-parse", "HEAD"), "status": "materials_and_protocol_await_review", "runtime_adapters": "research_transport_fixture_only_not_live_validated", "results": None, "llm_calls": 0, "production_before": before}
+        manifest = {"snapshot_id": snapshot_id, "created_at_utc": datetime.now(timezone.utc).isoformat(), "study_id": config["study_id"], "source_records": len(rows), "text_characters": sum(len(r["record"]["text_raw"]) for r in rows), "batches": dict(sorted(Counter(r["batch"] for r in rows).items())), "attachments_excluded": dict(Counter({key: sum(r["attachment_counts"].get(key, 0) for r in rows) for key in {k for r in rows for k in r["attachment_counts"]}})), "identity": identity, "tesla_commit": config["tesla_commit"], "openwiki_commit": config["openwiki_commit"], "preparer_git_commit": git(root, "rev-parse", "HEAD"), "status": config["status"], "runtime_adapters": "see_pinned_SUBSCRIPTION_RUN.md_and_RUNTIME_CHECKS.md", "results": None, "llm_calls": 0, "production_before": before}
         write_json(folder / "manifest.json", manifest)
         checksums = {p.relative_to(folder).as_posix(): sha(p.read_bytes()) for p in sorted(folder.rglob("*")) if p.is_file()}
         write_json(folder / "checksums.json", checksums)
@@ -271,7 +300,11 @@ def freeze(root: Path, vendor: Path, config_path: Path) -> Path:
 def preflight(folder: Path) -> dict:
     checked = verify(folder)
     config = json.loads((folder / "protocol.json").read_text(encoding="utf-8"))
-    blockers = ["Materials have not been approved", "Historical gold facts have not been reviewed and approved", "Protocol is a draft, not yet frozen for execution", "Provider access, supported output limit, pricing and budget have not been verified/approved", "End-to-end paid execution, request logging, isolation and budget enforcement still require validation before a study run"]
+    if config.get("paid_api_allowed") is False:
+        blockers = ["Both native subscription pipelines need validation in the same isolated study runtime",
+                    "The chronological study runner and checkpoint/recovery handling are not yet validated"]
+    else:
+        blockers = ["Materials have not been approved", "Historical gold facts have not been reviewed and approved", "Protocol is a draft, not yet frozen for execution", "Provider access, supported output limit, pricing and budget have not been verified/approved", "End-to-end paid execution, request logging, isolation and budget enforcement still require validation before a study run"]
     if config.get("prompt_scope_status", "").startswith("blocked"):
         blockers.insert(0, "Current canonical instructions contain historical details outside the selected corpus; research instruction profile needs an explicit decision and diff review")
     return {**checked, "ready_for_generation": False, "blockers": blockers, "planned_repetitions": config["planned_repetitions"], "planned_monthly_updates": config["planned_repetitions"] * len(config["arms"]) * 12, "note": "Updates are not API calls: both methods may issue several calls per update. No cost estimate is asserted."}

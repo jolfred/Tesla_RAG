@@ -1,6 +1,7 @@
 {
   "study_id": "yunost-2024-system-comparison-v1",
-  "status": "draft_for_review_not_preregistered",
+  "status": "user_authorized_preparation_subscription_compatibility_validation",
+  "revision": 2,
   "source_file": "storage/posts/posts_spoyunost2020.jsonl",
   "source_domain": "spoyunost2020",
   "group_id": "198864697",
@@ -25,17 +26,24 @@
   "llm_judge_role": "optional_secondary_after_human_calibration",
   "model_id": "gpt-6-luna",
   "model_selection": "user_selected_2026-10-20",
-  "provider_endpoint": null,
-  "api_transport": "responses",
+  "provider_endpoint": "chatgpt_subscription_codex_backend",
+  "api_transport": "superseded_by_subscription_no_paid_api",
+  "transports": {"tesla": "codex_cli", "openwiki": "native_openai_chatgpt"},
+  "paid_api_allowed": false,
+  "subscription_authorized_by_user": "2026-10-22: Да, главное — через мою подписку",
+  "quota_guard": {"source": "codex_app_server_account_rateLimits_read", "minimum_remaining_percent_exclusive": 10, "before_every_model_request": true, "on_unknown": "stop"},
+  "openwiki_compatibility_patch": "openwiki-luna-compat.patch",
   "model_parameters": {"reasoning": {"effort": "medium"}},
-  "proposed_max_output_tokens_per_call": 16384,
-  "confirmed_scope": {"empty_wikis": true, "selected_2024_text_corpus_only": true, "shared_api_model": true},
-  "instruction_profile": "production_verbatim_pending_historical_leakage_review",
-  "prompt_scope_status": "blocked_current_canon_contains_historical_details_outside_corpus",
+  "proposed_max_output_tokens_per_call": null,
+  "confirmed_scope": {"empty_wikis": true, "selected_2024_text_corpus_only": true, "shared_model": true, "chatgpt_subscription": true},
+  "instruction_profile": "instruction-proposal_research_copy_only",
+  "prompt_scope_status": "research_copy_requested_and_prepared_requires_runtime_hash_validation",
+  "working_reference": "working/user-reviewed-reference-v2",
+  "reference_limitations": "model_assisted_list_generally_accepted_by_one_user_not_independent_double_annotation",
   "budget_limit": null,
   "generation_approvals": {
-    "materials": "pending",
-    "gold_and_methodology": "pending",
-    "model_transport_and_budget": "pending"
+    "materials": "corpus_and_empty_wikis_confirmed_by_user",
+    "gold_and_methodology": "general_list_acceptance_and_proceed_recorded_no_itemwise_review_claimed",
+    "model_transport_and_budget": "subscription_authorized_paid_api_not_authorized"
   }
 }

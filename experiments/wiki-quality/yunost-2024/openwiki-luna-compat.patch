@@ -1,0 +1,27 @@
+diff --git a/src/agent/openai-chatgpt-oauth.ts b/src/agent/openai-chatgpt-oauth.ts
+index d769f8b..4b21f86 100644
+--- a/src/agent/openai-chatgpt-oauth.ts
++++ b/src/agent/openai-chatgpt-oauth.ts
+@@ -51,7 +51,9 @@ export function createCodexFetch(
+ ): typeof fetch {
+   return async (input, init) => {
+     const isCodexRequest = isCodexResponsesRequest(input);
+-    const useLunaProtocol = modelId === CODEX_LUNA_MODEL_ID && isCodexRequest;
++    const useLunaProtocol =
++      (modelId === CODEX_LUNA_MODEL_ID || modelId === "gpt-6-luna") &&
++      isCodexRequest;
+     const omitPromptCacheRetention =
+       (modelId === "gpt-5.6" || modelId.startsWith("gpt-5.6-")) &&
+       isCodexRequest;
+diff --git a/src/config/reasoning.ts b/src/config/reasoning.ts
+index 6dd360a..e54e932 100644
+--- a/src/config/reasoning.ts
++++ b/src/config/reasoning.ts
+@@ -54,6 +54,7 @@ const REASONING_CAPABILITIES: Partial<
+     "gpt-5.6-sol": OPENAI_GPT_56_REASONING_CAPABILITY,
+   },
+   "openai-chatgpt": {
++    "gpt-6-luna": OPENAI_GPT_56_REASONING_CAPABILITY,
+     "gpt-5.6-terra": OPENAI_GPT_56_REASONING_CAPABILITY,
+     "gpt-5.6-luna": OPENAI_GPT_56_REASONING_CAPABILITY,
+     "gpt-5.6-sol": OPENAI_GPT_56_REASONING_CAPABILITY,

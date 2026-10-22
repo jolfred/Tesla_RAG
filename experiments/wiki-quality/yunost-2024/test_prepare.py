@@ -102,6 +102,25 @@ class PreparationTests(unittest.TestCase):
         expected = "OVERRIDE\n\n" + prepare.MARKER + "\n\nCANON rules.md\n\nCANON rules_mapping.md\n\n--- EDITORIAL SKILL ---\n\nEXISTING SKILL"
         self.assertEqual(result["stages"]["wiki_extract"]["effective"], expected)
         self.assertNotIn("STALE", result["stages"]["wiki_merge"]["effective"])
+        research = self.root / "research-canon"
+        research.mkdir()
+        for name in ("rules.md", "rules_mapping.md"):
+            (research / name).write_text("RESEARCH " + name, encoding="utf-8")
+        isolated = prepare.prompt_snapshot(self.root, research)
+        self.assertIn("RESEARCH rules.md", isolated["stages"]["wiki_extract"]["effective"])
+        self.assertNotIn("CANON rules.md", isolated["stages"]["wiki_extract"]["effective"])
+        self.assertEqual((self.root / "schema/rules.md").read_text(encoding="utf-8"), "CANON rules.md")
+        self.assertEqual(before, db.read_bytes())
+
+    def test_nested_reference_checksum_is_itself_protected(self):
+        prepare.write_json(self.root / "manifest.json", {"snapshot_id": "test", "source_records": 1})
+        nested = self.root / "annotations/reference/checksums.json"
+        prepare.write_json(nested, {"fact.json": "original"})
+        sums = {p.relative_to(self.root).as_posix(): prepare.sha(p.read_bytes()) for p in self.root.rglob("*") if p.is_file()}
+        prepare.write_json(self.root / "checksums.json", sums)
+        self.assertEqual(prepare.verify(self.root)["checked_files"], 2)
+        prepare.write_json(nested, {"fact.json": "changed"})
+        with self.assertRaises(ValueError): prepare.verify(self.root)
 
     def test_preflight_remains_closed_for_draft_materials(self):
         prepare.write_json(self.root / "manifest.json", {"snapshot_id": "test", "source_records": 145})
