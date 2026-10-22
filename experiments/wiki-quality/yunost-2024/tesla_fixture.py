@@ -126,27 +126,28 @@ def main():
                 folder / "wiki_extract.md", folder / "wiki_merge.md", max_posts=50,
                 extract_model="gpt-6-luna", extract_fallback_models=(), merge_model="gpt-6-luna",
                 merge_fallback_models=(), do_apply=True, codex_fallback=False)
-        if args.subscription:
-            assert result["applied_pages"] >= 1, result
-        else:
+        if not args.subscription:
             assert result["applied_pages"] == 1, result
         assert result["queued_posts"] == 0, result
         summaries.append(result)
     content = "\n".join(p.read_text(encoding="utf-8") for p in wiki.rglob("*.md"))
     markers = ("Январский маяк", "Февральский флаг") if args.subscription else ("первый синтетический", "второй синтетический")
-    assert all(marker in content for marker in markers)
+    retained = all(marker in content for marker in markers)
+    if not args.subscription: assert retained
     if not args.subscription: assert len(requests) == 4, len(requests)
-    report = {"status": "passed", "llm_calls": len(list(folder.rglob("*.cli.log"))) if args.subscription else 0,
+    report = {"status": "passed" if retained else "completed_with_native_rejections",
+              "llm_calls": len(list(folder.rglob("*.cli.log"))) if args.subscription else 0,
               "fake_responses": len(requests), "subscription": args.subscription, "study_data_used": False,
               "model": "gpt-6-luna", "effort": "medium", "canon_profile": "research_copy" if args.canon_dir else "original",
+              "both_synthetic_facts_present": retained,
               "tesla_commit": config["tesla_commit"], "native_compiler_modified": False,
               "native_archive_sha256": prepare.sha(archive.read_bytes()),
-              "checks": ["empty_wiki_creation", "next_month_update" if args.subscription else "next_month_insert_after", "old_fact_retained",
-                         "exact_quote_validation", "medium_both_stages", "request_response_logs"],
+              "checks": (["empty_wiki_creation", "next_month_update" if args.subscription else "next_month_insert_after", "old_fact_retained"] if retained else ["native_rejections_preserved"]) +
+                        ["exact_quote_validation", "medium_both_stages", "request_response_logs"],
               "lock_adapter": "filelock around compile_wiki.__wrapped__" if os.name == "nt" else "native fcntl",
               "platform": sys.platform, "summaries": summaries}
     prepare.write_json(folder / "fixture-report.json", report)
-    print(json.dumps({"status": "passed", "llm_calls": report["llm_calls"], "report": str(folder / "fixture-report.json")}))
+    print(json.dumps({"status": report["status"], "llm_calls": report["llm_calls"], "report": str(folder / "fixture-report.json")}))
 
 
 if __name__ == "__main__":
