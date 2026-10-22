@@ -139,6 +139,18 @@ def production_fingerprint(root: Path) -> dict:
     return {p.relative_to(root).as_posix(): sha(p.read_bytes()) for p in paths if p.is_file()}
 
 
+def openwiki_task_payload(month: str, initial_month: str, canon_dir: Path) -> dict:
+    """Visible task metadata; both arms use the selected research canon."""
+    return {
+        "user_request_verbatim": "Возьмем статьи СПО юность за 2024 год и сделаем два варианта вики на нашей системе и с langchain wiki.",
+        "confirmed_user_scope": {"initial_wiki": "empty" if month == initial_month else "previous_month_checkpoint",
+                                 "evidence": "selected_2024_exported_post_text_only", "outside_sources": False,
+                                 "available_through_batch": month},
+        "source_specific_connector_raw_data": {"connectorId": "custom-mcp", "path": month + "/posts.jsonl"},
+        "canonical_domain_rules_verbatim": {name: (canon_dir / name).read_text(encoding="utf-8")
+                                            for name in ("rules.md", "rules_mapping.md")}}
+
+
 def review_html(rows: list[dict], config: dict) -> str:
     esc = html.escape
     chunks = ['<!doctype html><html lang="ru"><meta charset="utf-8"><title>Юность 2024 — материалы исследования</title>',
@@ -218,14 +230,7 @@ def freeze(root: Path, vendor: Path, config_path: Path) -> Path:
             out.parent.mkdir(parents=True)
             out.write_text("".join(json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n" for r in part), encoding="utf-8")
             # A visible task payload, not a replacement for upstream system prompts.
-            write_json(folder / "prompts/openwiki-input" / (month + ".json"), {
-                "user_request_verbatim": "Возьмем статьи СПО юность за 2024 год и сделаем два варианта вики на нашей системе и с langchain wiki.",
-                "confirmed_user_scope": {"initial_wiki": "empty" if month == months[0] else "previous_month_checkpoint",
-                                         "evidence": "selected_2024_exported_post_text_only", "outside_sources": False,
-                                         "available_through_batch": month},
-                "source_specific_connector_raw_data": {"connectorId": "custom-mcp", "path": month + "/posts.jsonl"},
-                "canonical_domain_rules_verbatim": {name: (root / "schema" / name).read_text(encoding="utf-8") for name in ("rules.md", "rules_mapping.md")}
-            })
+            write_json(folder / "prompts/openwiki-input" / (month + ".json"), openwiki_task_payload(month, months[0], canon_dir))
         for key, prompt in prompts["stages"].items():
             path = folder / "prompts/tesla" / (key + ".md")
             path.parent.mkdir(parents=True, exist_ok=True)

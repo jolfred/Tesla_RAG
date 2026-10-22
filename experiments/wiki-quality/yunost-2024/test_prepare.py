@@ -7,8 +7,10 @@ import sqlite3
 import tempfile
 import types
 import unittest
+from unittest.mock import patch
 
 import prepare
+import tesla_run_month
 from tesla_transport import make_provider
 
 
@@ -110,6 +112,10 @@ class PreparationTests(unittest.TestCase):
         self.assertIn("RESEARCH rules.md", isolated["stages"]["wiki_extract"]["effective"])
         self.assertNotIn("CANON rules.md", isolated["stages"]["wiki_extract"]["effective"])
         self.assertEqual((self.root / "schema/rules.md").read_text(encoding="utf-8"), "CANON rules.md")
+        payload = prepare.openwiki_task_payload("2024-02", "2024-01", research)
+        self.assertEqual(payload["canonical_domain_rules_verbatim"]["rules.md"], "RESEARCH rules.md")
+        self.assertEqual(payload["confirmed_user_scope"]["available_through_batch"], "2024-02")
+        self.assertEqual(payload["confirmed_user_scope"]["initial_wiki"], "previous_month_checkpoint")
         self.assertEqual(before, db.read_bytes())
 
     def test_nested_reference_checksum_is_itself_protected(self):
@@ -121,6 +127,23 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(prepare.verify(self.root)["checked_files"], 2)
         prepare.write_json(nested, {"fact.json": "changed"})
         with self.assertRaises(ValueError): prepare.verify(self.root)
+
+    def test_native_month_rejects_changed_batch_before_model_import(self):
+        source = self.source([self.row()])
+        cfg = self.root / "job.json"
+        prepare.write_json(cfg, {"output": str(self.root / "storage/experiments/yunost-2024/job"),
+            "batch_file": str(source), "batch_file_sha256": "incorrect", "month": "2024-01"})
+        with patch.object(prepare, "ROOT", self.root), self.assertRaisesRegex(ValueError, "hash mismatch"):
+            tesla_run_month.main(cfg)
+
+    def test_native_month_rejects_future_source_before_model_import(self):
+        source = self.source([self.row(date="2024-02-01T10:00:00Z")])
+        cfg = self.root / "job.json"
+        prepare.write_json(cfg, {"output": str(self.root / "storage/experiments/yunost-2024/job"),
+            "batch_file": str(source), "batch_file_sha256": prepare.sha(source.read_bytes()), "month": "2024-01"})
+        with patch.object(prepare, "ROOT", self.root):
+            with self.assertRaisesRegex(ValueError, "outside the selected"):
+                tesla_run_month.main(cfg)
 
     def test_preflight_remains_closed_for_draft_materials(self):
         prepare.write_json(self.root / "manifest.json", {"snapshot_id": "test", "source_records": 145})

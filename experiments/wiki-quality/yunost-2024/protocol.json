@@ -1,7 +1,7 @@
 {
   "study_id": "yunost-2024-system-comparison-v1",
-  "status": "user_authorized_preparation_subscription_compatibility_validation",
-  "revision": 2,
+  "status": "preparation_model_checks_blocked_by_subscription_quota_shared_runtime_not_validated",
+  "revision": 3,
   "source_file": "storage/posts/posts_spoyunost2020.jsonl",
   "source_domain": "spoyunost2020",
   "group_id": "198864697",
@@ -33,6 +33,7 @@
   "subscription_authorized_by_user": "2026-10-22: Да, главное — через мою подписку",
   "quota_guard": {"source": "codex_app_server_account_rateLimits_read", "minimum_remaining_percent_exclusive": 10, "before_every_model_request": true, "on_unknown": "stop"},
   "openwiki_compatibility_patch": "openwiki-luna-compat.patch",
+  "research_runtime": {"os": "linux", "node": "22.22.1", "pnpm": "11.25.0", "codex_cli": "0.163.0-alpha.11", "tesla_batch_size": 50, "tesla_char_budget": 40000, "model_request_timeout_seconds": 900, "openwiki_request_ceiling_per_month": 500},
   "model_parameters": {"reasoning": {"effort": "medium"}},
   "proposed_max_output_tokens_per_call": null,
   "confirmed_scope": {"empty_wikis": true, "selected_2024_text_corpus_only": true, "shared_model": true, "chatgpt_subscription": true},
