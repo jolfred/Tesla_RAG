@@ -32,8 +32,10 @@ codex_subscription.py --check и обычный запуск openwiki_subscripti
 поправки, хеши инструкций, код адаптеров, патч OpenWiki и пользовательскую проверку.
 Рабочая Wiki, production canon, ledger, admin DB, расписание и сайт не меняются.
 
-Месячный запуск: `study_run.py <snapshot>`. До исторической генерации обязательны
+Месячный запуск на сервере: `study_run.py <snapshot> --runtime-config <server-runtime.json>`. До исторической генерации обязательны
 его `--check-only` и синтетические проверки `--synthetic openwiki` / `--synthetic tesla`.
 Готовность проверяет `prepare.py preflight <snapshot>`. Изоляция использует готовый
 Linux bwrap; точная сборка зафиксирована в runtime-lock.json. Порядок берётся из
 allocation.json, неудачный шаг сохраняется и останавливает дальнейшее выполнение.
+Выполнение только на сервере пользователя, в существующем Tesla checkout;
+локальная WSL больше не используется. Runtime config содержит пути, не пароли.

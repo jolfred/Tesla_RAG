@@ -2,7 +2,7 @@
 
 Run: job_sandbox.py CONFIG.json [--check-only]. No fallback outside bwrap.
 Host config paths: workers, inputs, output_parent (existing empty directory),
-auth_file, python_venv, codex_bin_dir, vendor; optional previous and synthetic.
+auth_file, python_venv, codex_bin_dir, node_bin_dir, vendor; optional previous and synthetic.
 worker_job_file is an inputs filename or /inputs/ path (default job-config.json).
 Results: output_parent/work/result; launcher logs remain outside the sandbox.
 Runtime lock: node_version, codex_version, codex_sha256,
@@ -104,7 +104,8 @@ with tempfile.TemporaryDirectory(prefix='tesla-cli-output-') as temp:
 
 
 def sha(file):
-    return hashlib.sha256(file.read_bytes()).hexdigest()
+    with file.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def write_json(file, value):
@@ -190,7 +191,7 @@ def main():
     if not job_file.is_relative_to("/inputs") or ".." in job_file.parts:
         raise ValueError("worker_job_file must stay inside /inputs")
     paths = {name: Path(config[name]).resolve(strict=True) for name in
-             ("workers", "inputs", "output_parent", "auth_file", "python_venv", "codex_bin_dir", "vendor")}
+             ("workers", "inputs", "output_parent", "auth_file", "python_venv", "codex_bin_dir", "node_bin_dir", "vendor")}
     output = paths["output_parent"]
     if not output.is_dir() or any(output.iterdir()):
         raise ValueError("output_parent must be an existing empty directory")
@@ -225,14 +226,16 @@ def main():
                 "--tmpfs", "/home", "--dir", "/home/research", "--tmpfs", "/codex-home"]
     for name, destination in (("workers", WORKERS), ("inputs", "/inputs"), ("vendor", "/vendor"),
                               ("python_venv", "/runtime-python"), ("codex_bin_dir", "/codex-native"),
+                              ("node_bin_dir", "/node-bin"),
                               ("auth_file", "/codex-home/auth.json")):
         command += ["--ro-bind", str(paths[name]), destination]
     if config.get("previous"):
         command += ["--ro-bind", str(Path(config["previous"]).resolve(strict=True)), PREVIOUS]
     command += ["--bind", str(work), PRIVATE + "/working", "--chdir", "/study",
                 "--setenv", "HOME", "/home/research", "--setenv", "CODEX_HOME", "/codex-home",
-                "--setenv", "PATH", "/inputs/.sandbox-support/shim:/codex-native:/usr/local/bin:/usr/bin:/bin",
+                "--setenv", "PATH", "/inputs/.sandbox-support/shim:/codex-native:/node-bin:/usr/local/bin:/usr/bin:/bin",
                 "--setenv", "PYTHONDONTWRITEBYTECODE", "1", "--setenv", "PYTHON_DOTENV_DISABLED", "1",
+                "--setenv", "NODE_OPTIONS", "--max-old-space-size=256",
                 "--setenv", "LANG", "C.UTF-8", "--setenv", "TZ", "Europe/Moscow"]
     logs = output / "launcher-logs"
     logs.mkdir()

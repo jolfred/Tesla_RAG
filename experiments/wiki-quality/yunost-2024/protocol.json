@@ -1,7 +1,7 @@
 {
   "study_id": "yunost-2024-system-comparison-v1",
-  "status": "isolated_execution_adapters_prepared_runtime_checks_required",
-  "revision": 4,
+  "status": "native_server_execution_prepared_runtime_checks_required",
+  "revision": 5,
   "source_file": "storage/posts/posts_spoyunost2020.jsonl",
   "source_domain": "spoyunost2020",
   "group_id": "198864697",
@@ -35,6 +35,8 @@
   "openwiki_compatibility_patch": "openwiki-luna-compat.patch",
   "research_runtime": {"os": "linux", "node": "22.22.1", "pnpm": "11.25.0", "codex_cli": "0.163.0-alpha.11", "tesla_batch_size": 50, "tesla_char_budget": 40000, "model_request_timeout_seconds": 900, "openwiki_request_ceiling_per_month": 500},
   "runtime_lock": "runtime-lock.json",
+  "execution_host": "user_ssh_server_existing_tesla_checkout_no_local_wsl",
+  "resource_limits": {"concurrent_jobs": 1, "memory_max_mib": 416, "memory_high_mib": 320, "cpu_quota_percent": 80, "node_v8_old_space_mib": 256},
   "execution_isolation": "bwrap_new_root_current_month_same_arm_repetition_previous_checkpoint_only",
   "codex_transport_flags": ["--ignore-user-config", "--ignore-rules", "web_search=disabled"],
   "failed_job_policy": "preserve_all_evidence_stop_schedule_no_automatic_retry_or_replacement_review_required",
