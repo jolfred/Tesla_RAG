@@ -136,9 +136,10 @@ def internal_check(config):
         assert not relative.is_absolute() and ".." not in relative.parts and relative.parts[0] == "src"
         assert sha(Path("/vendor") / relative) == expected, "Patched source changed"
     node_check = """import assert from 'node:assert/strict';
-import Database from '/vendor/node_modules/better-sqlite3/lib/index.js';
+import {SqliteSaver} from '/vendor/node_modules/@langchain/langgraph-checkpoint-sqlite/dist/index.js';
 import {resolveReasoningConfig} from '/vendor/dist/config/reasoning.js';
-const db = new Database(':memory:'); assert.equal(db.prepare('select 1 as n').get().n,1); db.close();
+const saver = await SqliteSaver.fromConnString(':memory:');
+assert.equal(await saver.getTuple({configurable:{thread_id:'runtime-probe',checkpoint_ns:''}}),undefined);
 assert.deepEqual(resolveReasoningConfig('openai-chatgpt','gpt-6-luna'),
  {effort:'medium',transport:'responses-reasoning'});"""
     subprocess.run(["node", "--input-type=module", "-e", node_check], check=True)
