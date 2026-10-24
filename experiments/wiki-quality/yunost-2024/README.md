@@ -31,3 +31,9 @@ codex_subscription.py --check и обычный запуск openwiki_subscripti
 Исходный снимок e602df54df7b3ecc07c9 сохранён неизменным. Новый снимок фиксирует
 поправки, хеши инструкций, код адаптеров, патч OpenWiki и пользовательскую проверку.
 Рабочая Wiki, production canon, ledger, admin DB, расписание и сайт не меняются.
+
+Месячный запуск: `study_run.py <snapshot>`. До исторической генерации обязательны
+его `--check-only` и синтетические проверки `--synthetic openwiki` / `--synthetic tesla`.
+Готовность проверяет `prepare.py preflight <snapshot>`. Изоляция использует готовый
+Linux bwrap; точная сборка зафиксирована в runtime-lock.json. Порядок берётся из
+allocation.json, неудачный шаг сохраняется и останавливает дальнейшее выполнение.

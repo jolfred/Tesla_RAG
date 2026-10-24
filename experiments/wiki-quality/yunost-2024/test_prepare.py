@@ -145,6 +145,81 @@ class PreparationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "outside the selected"):
                 tesla_run_month.main(cfg)
 
+    def test_native_month_requires_integer_repetition_before_model_import(self):
+        source = self.source([self.row(date="2024-01-05T10:00:00Z")])
+        for index, repetition in enumerate((None, 0, 6, "1", True)):
+            with self.subTest(repetition=repetition):
+                cfg = self.root / "job.json"
+                prepare.write_json(cfg, {"output": str(self.root / f"storage/experiments/yunost-2024/job-{index}"),
+                    "batch_file": str(source), "batch_file_sha256": prepare.sha(source.read_bytes()),
+                    "month": "2024-01", "repetition": repetition})
+                with patch.object(prepare, "ROOT", self.root), self.assertRaisesRegex(ValueError, "Study repetition"):
+                    tesla_run_month.main(cfg)
+
+    def previous_checkpoint(self, arm="tesla", repetition=1):
+        private = self.root / "storage/experiments/yunost-2024"
+        prior = private / "previous"
+        (prior / "wiki").mkdir(parents=True, exist_ok=True)
+        (prior / "wiki/page.md").write_text("January synthetic evidence", encoding="utf-8")
+        prepare.write_json(prior / "report.json", {"status": "completed", "snapshot_id": "a" * 20,
+            "arm": arm, "repetition": repetition, "month": "2024-01"})
+        sums = {p.relative_to(prior).as_posix(): prepare.sha(p.read_bytes())
+                for p in prior.rglob("*") if p.is_file() and p.name != "checksums.json"}
+        prepare.write_json(prior / "checksums.json", sums)
+        return private, {"previous": str(prior), "previous_checksums_sha256": prepare.sha((prior / "checksums.json").read_bytes()),
+                         "snapshot_id": "a" * 20, "repetition": 1, "month": "2024-02"}
+
+    def test_previous_checkpoint_accepts_complete_matching_chain(self):
+        private, config = self.previous_checkpoint()
+        self.assertEqual(tesla_run_month.verify_previous(config, private), Path(config["previous"]))
+
+    def test_previous_checkpoint_rejects_changed_page_and_file_set(self):
+        private, config = self.previous_checkpoint()
+        prior = Path(config["previous"])
+        page = prior / "wiki/page.md"
+        original = page.read_bytes()
+        page.write_text("Changed evidence", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "file hash mismatch"):
+            tesla_run_month.verify_previous(config, private)
+        page.write_bytes(original)
+        (prior / "unrecorded.md").write_text("Unrecorded evidence", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "file set changed"):
+            tesla_run_month.verify_previous(config, private)
+
+    def test_previous_checkpoint_rejects_changed_checksum_manifest(self):
+        private, config = self.previous_checkpoint()
+        with (Path(config["previous"]) / "checksums.json").open("a", encoding="utf-8") as handle:
+            handle.write("\n")
+        with self.assertRaisesRegex(ValueError, "manifest hash mismatch"):
+            tesla_run_month.verify_previous(config, private)
+
+    def test_previous_checkpoint_rejects_other_repetition_and_arm(self):
+        for arm, repetition in (("openwiki", 1), ("tesla", 2), ("tesla", True)):
+            with self.subTest(arm=arm, repetition=repetition):
+                private, config = self.previous_checkpoint(arm, repetition)
+                with self.assertRaisesRegex(ValueError, "wrong version/month/status/arm/repetition"):
+                    tesla_run_month.verify_previous(config, private)
+
+    def test_previous_checkpoint_rejects_unsafe_manifest_paths(self):
+        for name in ("../outside.md", "/outside.md", "wiki/../report.json", "wiki\\page.md", "C:/outside.md"):
+            with self.subTest(name=name):
+                private, config = self.previous_checkpoint()
+                checksum_file = Path(config["previous"]) / "checksums.json"
+                prepare.write_json(checksum_file, {name: "a" * 64})
+                config["previous_checksums_sha256"] = prepare.sha(checksum_file.read_bytes())
+                with self.assertRaisesRegex(ValueError, "unsafe checksum entry"):
+                    tesla_run_month.verify_previous(config, private)
+
+    def test_previous_checkpoint_rejects_symlink_before_copy(self):
+        private, config = self.previous_checkpoint()
+        prior = Path(config["previous"])
+        try:
+            (prior / "wiki/alias.md").symlink_to(prior / "wiki/page.md")
+        except OSError as exc:
+            self.skipTest("This platform does not permit test symlinks: " + type(exc).__name__)
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            tesla_run_month.verify_previous(config, private)
+
     def test_preflight_remains_closed_for_draft_materials(self):
         prepare.write_json(self.root / "manifest.json", {"snapshot_id": "test", "source_records": 145})
         prepare.write_json(self.root / "protocol.json", {"planned_repetitions": 5, "arms": ["tesla", "openwiki"],

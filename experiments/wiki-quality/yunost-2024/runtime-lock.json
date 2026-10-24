@@ -1,0 +1,11 @@
+{
+  "codex_sha256": "ff3a6a3ed13735b8a8938c40141eb38b688efd6b02ee0fd5358187111fe9966a",
+  "codex_version": "codex-cli 0.163.0-alpha.11",
+  "node_version": "v22.22.1",
+  "openwiki_dist_tree_sha256": "be036e74640bb5e76d54ccc88dce67c4a78b5cd3b501c70723ba3a9a9990c517",
+  "openwiki_patched_sources": {
+    "src/agent/openai-chatgpt-oauth.ts": "d149ddb3872e134d3615a7f4cb966fb339a5ba8d393967d5eafda74217eac922",
+    "src/config/reasoning.ts": "ac0b4bca94fa4fd7e31398e61387e720f4ccb68aa860061f60b4273e43e24fe1"
+  },
+  "openwiki_pnpm_lock_sha256": "33452856b242d866ecfff8fbf32bf42f3765b2a184df3c7025c6cbf6b8ee92c5"
+}

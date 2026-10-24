@@ -306,13 +306,14 @@ def preflight(folder: Path) -> dict:
     checked = verify(folder)
     config = json.loads((folder / "protocol.json").read_text(encoding="utf-8"))
     if config.get("paid_api_allowed") is False:
-        blockers = ["Both native subscription pipelines need validation in the same isolated study runtime",
-                    "The chronological study runner and checkpoint/recovery handling are not yet validated"]
+        from study_run import readiness
+        runtime = readiness(folder)
+        blockers = ["Missing preserved isolated runtime check: " + name for name, passed in runtime["checks"].items() if not passed]
     else:
         blockers = ["Materials have not been approved", "Historical gold facts have not been reviewed and approved", "Protocol is a draft, not yet frozen for execution", "Provider access, supported output limit, pricing and budget have not been verified/approved", "End-to-end paid execution, request logging, isolation and budget enforcement still require validation before a study run"]
     if config.get("prompt_scope_status", "").startswith("blocked"):
         blockers.insert(0, "Current canonical instructions contain historical details outside the selected corpus; research instruction profile needs an explicit decision and diff review")
-    return {**checked, "ready_for_generation": False, "blockers": blockers, "planned_repetitions": config["planned_repetitions"], "planned_monthly_updates": config["planned_repetitions"] * len(config["arms"]) * 12, "note": "Updates are not API calls: both methods may issue several calls per update. No cost estimate is asserted."}
+    return {**checked, "ready_for_generation": not blockers, "blockers": blockers, "planned_repetitions": config["planned_repetitions"], "planned_monthly_updates": config["planned_repetitions"] * len(config["arms"]) * 12, "note": "Updates are not API calls: both methods may issue several calls per update. No cost estimate is asserted."}
 
 
 def main() -> None:

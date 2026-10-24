@@ -21,6 +21,8 @@ const study = studySpecArg ? JSON.parse(await fs.readFile(studySpecArg, "utf8"))
 if (study) {
   assert.match(study.month, /^2024-(0[1-9]|1[0-2])$/u);
   assert.match(study.snapshot_id, /^[a-f0-9]{20}$/u);
+  assert.ok(Number.isInteger(study.repetition) && study.repetition >= 1 && study.repetition <= 5,
+    "Study repetition must be an integer from 1 to 5");
   assert.equal(Boolean(continueFromArg), study.month !== "2024-01");
 }
 assert.ok(vendorArg && outputArg && python, "Expected vendor, new output, Python executable");
@@ -30,14 +32,66 @@ const rel = path.relative(privateRoot, output);
 assert.ok(rel && !rel.startsWith("..") && !path.isAbsolute(rel), "Use a new private study directory");
 await fs.mkdir(output, { recursive: false });
 const home = path.join(output, "home");
+async function verifyCheckpoint(previous, expectedChecksum) {
+  assert.match(expectedChecksum, /^[a-f0-9]{64}$/u, "A frozen checkpoint checksum is required");
+  // Reject links in the path as well as inside the checkpoint before copying it.
+  let component = privateRoot;
+  assert.ok(!(await fs.lstat(component)).isSymbolicLink(), "Checkpoint root must not be a link");
+  for (const part of path.relative(privateRoot, previous).split(path.sep)) {
+    component = path.join(component, part);
+    assert.ok(!(await fs.lstat(component)).isSymbolicLink(), "Checkpoint path must not contain links");
+  }
+  const checksumFile = path.join(previous, "checksums.json");
+  assert.ok((await fs.lstat(checksumFile)).isFile(), "Checkpoint checksums must be a regular file");
+  const bytes = await fs.readFile(checksumFile);
+  assert.equal(createHash("sha256").update(bytes).digest("hex"), expectedChecksum,
+    "Checkpoint checksum manifest changed");
+  const manifest = JSON.parse(bytes.toString("utf8"));
+  assert.ok(manifest && typeof manifest === "object" && !Array.isArray(manifest));
+  for (const [name, checksum] of Object.entries(manifest)) {
+    assert.ok(name && name !== "checksums.json" && !/[\\:\0]/u.test(name)
+      && !path.posix.isAbsolute(name) && path.posix.normalize(name) === name
+      && name.split("/").every(part => part && part !== "." && part !== ".."),
+    "Unsafe checkpoint manifest path");
+    assert.match(checksum, /^[a-f0-9]{64}$/u);
+  }
+  const found = [];
+  async function walk(directory, relative = "") {
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      const full = path.join(directory, entry.name);
+      const name = relative ? `${relative}/${entry.name}` : entry.name;
+      const info = await fs.lstat(full);
+      assert.ok(!info.isSymbolicLink(), "Checkpoint must not contain links");
+      if (info.isDirectory()) await walk(full, name);
+      else {
+        assert.ok(info.isFile(), "Checkpoint must contain only regular files/directories");
+        if (name === "checksums.json") continue;
+        assert.ok(Object.hasOwn(manifest, name), "Unlisted checkpoint file");
+        assert.equal(createHash("sha256").update(await fs.readFile(full)).digest("hex"),
+          manifest[name], `Changed checkpoint file: ${name}`);
+        found.push(name);
+      }
+    }
+  }
+  await walk(previous);
+  assert.deepEqual(found.sort(), Object.keys(manifest).sort(), "Checkpoint file set changed");
+}
 if (continueFromArg) {
   const previous = path.resolve(continueFromArg);
   const previousRel = path.relative(privateRoot, previous);
   assert.ok(previousRel && !previousRel.startsWith("..") && !path.isAbsolute(previousRel));
+  if (study) await verifyCheckpoint(previous, study.previous_checksums_sha256);
   const previousReport = JSON.parse(await fs.readFile(path.join(previous, "report.json"), "utf8"));
-  assert.ok(["passed", "completed", "completed_needs_artifact_verification"].includes(previousReport.status));
-  if (study) assert.equal(previousReport.snapshot_id, study.snapshot_id);
-  if (study) assert.equal(previousReport.month, `2024-${String(Number(study.month.slice(-2)) - 1).padStart(2, "0")}`);
+  if (study) {
+    assert.equal(previousReport.status, "completed");
+    assert.equal(previousReport.arm, "openwiki");
+    assert.equal(previousReport.repetition, study.repetition);
+    assert.equal(previousReport.snapshot_id, study.snapshot_id);
+    assert.equal(previousReport.month, `2024-${String(Number(study.month.slice(-2)) - 1).padStart(2, "0")}`);
+    assert.equal(previousReport.artifacts_complete, true);
+  } else {
+    assert.ok(["passed", "completed", "completed_needs_artifact_verification"].includes(previousReport.status));
+  }
   await fs.cp(path.join(previous, "home"), home, { recursive: true, errorOnExist: true });
 } else {
   await fs.mkdir(home);
@@ -72,6 +126,16 @@ let calls = 0;
 const started = Date.now();
 const attempts = [];
 let quotaStop = null;
+let artifactsComplete = true;
+const attemptJournal = path.join(output, "attempts.jsonl");
+function safeFailure(error) {
+  const safe = value => typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/u.test(value) ? value : null;
+  return { type: safe(error?.constructor?.name) ?? "Error", code: safe(error?.code ?? error?.cause?.code) };
+}
+function journal(event) {
+  try { appendFileSync(attemptJournal, JSON.stringify({ at_utc: new Date().toISOString(), ...event }) + "\n", "utf8"); }
+  catch (error) { artifactsComplete = false; throw error; }
+}
 globalThis.fetch = async (input, init) => {
   const url = new URL(input instanceof Request ? input.url : String(input));
   assert.equal(url.origin, "https://chatgpt.com", "Non-subscription endpoint blocked");
@@ -95,16 +159,42 @@ globalThis.fetch = async (input, init) => {
   assert.equal(body.store, false);
   calls++;
   const prefix = path.join(output, `call-${String(calls).padStart(3, "0")}`);
-  await fs.writeFile(prefix + "-request.json", JSON.stringify(body, null, 2));
-  await fs.writeFile(prefix + "-quota.json", JSON.stringify(limits, null, 2));
-  const timeout = study ? 900000 : 120000;
-  const response = await originalFetch(input, { ...init,
-    signal: init?.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout) });
-  const record = { call: calls, http_status: response.status };
+  const record = { call: calls, http_status: null, network_error: null, capture_status: "not_available" };
   attempts.push(record);
+  try {
+    await fs.writeFile(prefix + "-request.json", JSON.stringify(body, null, 2));
+    await fs.writeFile(prefix + "-quota.json", JSON.stringify(limits, null, 2));
+    journal({ event: "fetch_started", ...record });
+  } catch (error) { artifactsComplete = false; throw error; }
+  const timeout = study ? 900000 : 120000;
+  let response;
+  try {
+    response = await originalFetch(input, { ...init,
+      signal: init?.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout) });
+  } catch (error) {
+    record.network_error = safeFailure(error);
+    try {
+      await fs.writeFile(prefix + "-network-error.json", JSON.stringify(record.network_error, null, 2));
+      journal({ event: "fetch_failed", ...record });
+    } catch { artifactsComplete = false; }
+    throw error;
+  }
+  record.http_status = response.status;
+  record.capture_status = "pending";
   // Never persist request headers: they contain the account credential.
-  const capture = response.clone().text().then(text => fs.writeFile(prefix + "-response.txt", text));
-  attempts.at(-1).capture = capture;
+  record.capture = Promise.resolve().then(() => response.clone().text())
+    .then(async text => {
+      await fs.writeFile(prefix + "-response.txt", text);
+      record.capture_status = "complete";
+      journal({ event: "response_captured", call: record.call, http_status: record.http_status,
+        capture_status: record.capture_status });
+    }).catch(error => {
+      artifactsComplete = false;
+      record.capture_status = "failed";
+      record.capture_error = safeFailure(error);
+      try { journal({ event: "artifact_capture_failed", call: record.call,
+        artifacts_complete: false, error: record.capture_error }); } catch { /* Report remains failed. */ }
+    });
   return response;
 };
 
@@ -170,16 +260,20 @@ try {
   if (quotaStop) status = "quota_blocked";
   await fs.writeFile(path.join(output, "error-redacted.txt"), diagnostic);
 } finally {
-  await Promise.allSettled(attempts.map(x => x.capture));
+  await Promise.all(attempts.map(x => x.capture));
+  if (!artifactsComplete) status = "artifact_capture_failed";
+  try { journal({ event: "job_finished", status, artifacts_complete: artifactsComplete }); }
+  catch { status = "artifact_capture_failed"; }
   const report = { status, error_type: errorType, model: "gpt-6-luna", effort: "medium",
     transport: "openwiki_native_openai_chatgpt", subscription: true, paid_api_allowed: false,
     study_data_used: Boolean(study), arm: "openwiki", snapshot_id: study?.snapshot_id ?? null,
+    repetition: study?.repetition ?? null, artifacts_complete: artifactsComplete,
     command, month, request_ceiling: study ? 500 : 24,
     old_fact_retention_checked: status === "passed" && Boolean(continueFromArg),
-    calls, attempts: attempts.map(({ call, http_status }) => ({ call, http_status })),
+    calls, attempts: attempts.map(({ capture, ...record }) => record),
     wall_seconds: (Date.now() - started) / 1000, upstream_commit: "6c14bff27830034bfd70c15bde46825d7686ec60",
     compatibility_patch: "openwiki-luna-compat.patch", credentials_persisted_by_launcher: false };
   await fs.writeFile(path.join(output, "report.json"), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report));
-  process.exitCode = ["failed", "quota_blocked"].includes(status) ? 1 : 0;
+  process.exitCode = ["passed", "completed"].includes(status) ? 0 : 1;
 }

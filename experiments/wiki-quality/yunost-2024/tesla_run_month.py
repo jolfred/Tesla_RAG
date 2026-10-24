@@ -7,7 +7,8 @@ import argparse
 from contextlib import closing
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import re
 import shutil
 import sqlite3
 import sys
@@ -16,6 +17,48 @@ import time
 
 import prepare
 from tesla_codex_transport import make_provider
+
+
+def verify_previous(config, private):
+    """Check a complete frozen checkpoint before copying any of its files."""
+    prior = Path(config["previous"]).absolute()
+    if (not prior.resolve().is_relative_to(private)
+            or any(p.is_symlink() for p in (prior, *prior.parents) if p.is_relative_to(private))):
+        raise ValueError("Previous checkpoint outside study root or contains a symlink")
+    prior = prior.resolve()
+    checksum_file = prior / "checksums.json"
+    if checksum_file.is_symlink():
+        raise ValueError("Previous checkpoint contains a symlink")
+    checksum_bytes = checksum_file.read_bytes()
+    if prepare.sha(checksum_bytes) != config["previous_checksums_sha256"]:
+        raise ValueError("Previous checkpoint checksum manifest hash mismatch")
+    checksums = json.loads(checksum_bytes)
+    if not isinstance(checksums, dict):
+        raise ValueError("Previous checkpoint checksums must be a flat file map")
+    for name, digest in checksums.items():
+        relative = PurePosixPath(name)
+        if (not relative.parts or relative.is_absolute() or relative.as_posix() != name
+                or ".." in relative.parts or "\\" in name or ":" in name
+                or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)):
+            raise ValueError("Previous checkpoint has an unsafe checksum entry")
+    files = {}
+    for item in prior.rglob("*"):
+        if item.is_symlink() or not (item.is_file() or item.is_dir()):
+            raise ValueError("Previous checkpoint contains a symlink or special file")
+        if item.is_file() and item != checksum_file:
+            files[item.relative_to(prior).as_posix()] = item
+    if files.keys() != checksums.keys() or "report.json" not in checksums:
+        raise ValueError("Previous checkpoint file set changed or report is missing")
+    for name, item in files.items():
+        if prepare.sha(item.read_bytes()) != checksums[name]:
+            raise ValueError("Previous checkpoint file hash mismatch: " + name)
+    report = json.loads((prior / "report.json").read_text(encoding="utf-8"))
+    expected_month = f"2024-{int(config['month'][-2:]) - 1:02d}"
+    if (report.get("status") != "completed" or report.get("snapshot_id") != config["snapshot_id"]
+            or report.get("month") != expected_month or report.get("arm") != "tesla"
+            or type(report.get("repetition")) is not int or report["repetition"] != config["repetition"]):
+        raise ValueError("Previous checkpoint has wrong version/month/status/arm/repetition")
+    return prior
 
 
 def main(config_path):
@@ -39,6 +82,9 @@ def main(config_path):
         if (record["group_domain"] != "spoyunost2020" or str(record["group_id"]) != "198864697"
                 or prepare.parse_date(record["published_at"]).astimezone(prepare.MSK).strftime("%Y-%m") != config["month"]):
             raise ValueError("Source outside the selected community/month")
+    repetition = config.get("repetition")
+    if type(repetition) is not int or not 1 <= repetition <= 5:
+        raise ValueError("Study repetition must be an integer from 1 to 5")
     if os.name == "nt": raise ValueError("The study runner requires Linux")
     project = folder / "native"
     project.mkdir()
@@ -53,13 +99,7 @@ def main(config_path):
     wiki, db = folder / "wiki", folder / "ledger.sqlite"
     previous = config.get("previous")
     if previous:
-        prior = Path(previous).resolve()
-        if not prior.is_relative_to(private): raise ValueError("Previous checkpoint outside study root")
-        report = json.loads((prior / "report.json").read_text(encoding="utf-8"))
-        expected_previous_month = f"2024-{int(config['month'][-2:]) - 1:02d}"
-        if (report["status"] != "completed" or report["snapshot_id"] != config["snapshot_id"]
-                or report["month"] != expected_previous_month):
-            raise ValueError("Previous checkpoint has wrong version/month/status")
+        prior = verify_previous(config, private)
         shutil.copytree(prior / "wiki", wiki)
         with closing(sqlite3.connect((prior / "ledger.sqlite").as_uri() + "?mode=ro", uri=True)) as source:
             with closing(sqlite3.connect(db)) as destination: source.backup(destination)
@@ -72,7 +112,7 @@ def main(config_path):
     from backend.wiki.ingest import inventory
     compiler.call_provider_resilient = make_provider(compiler)
     started = time.monotonic()
-    report = {"snapshot_id": config["snapshot_id"], "month": config["month"], "arm": "tesla",
+    report = {"snapshot_id": config["snapshot_id"], "month": config["month"], "arm": "tesla", "repetition": repetition,
               "model": "gpt-6-luna", "effort": "medium", "paid_api_allowed": False,
               "study_data_used": True, "native_compiler_modified": False, "source_records": len(records)}
     try:
