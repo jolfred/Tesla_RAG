@@ -27,6 +27,7 @@ CATEGORY_NAMES = {'persons': 'Люди', 'people': 'Люди', 'events': 'Соб
                   'lso': 'Отряды', 'hq': 'Штаб', 'projects': 'Проекты',
                   'heritage': 'Традиции', 'tradition': 'Традиции',
                   'methodology': 'Методика', 'rso': 'РСО', 'wiki': 'Летопись'}
+CATEGORY_ORDER = ['hq', 'lso', 'events', 'persons', 'people', 'projects', 'heritage', 'tradition', 'methodology', 'rso', 'wiki']
 STYLE = """*{box-sizing:border-box}body{margin:0;background:#f8f9fa;color:#202122;font:15px/1.65 Arial,Helvetica,sans-serif}
 a{color:#36c;text-decoration:none;overflow-wrap:anywhere}a:hover{text-decoration:underline}button,input{font:inherit}
 .header{min-height:51px;padding:6px 15px;background:white;border-bottom:1px solid #a2a9b1;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
@@ -49,8 +50,16 @@ table{border-collapse:collapse;display:block;max-width:100%;overflow-x:auto;marg
 pre{overflow-x:auto;background:#f8f9fa;padding:12px;border:1px solid #eaecf0}code{font-size:90%}.missing{color:#626262;text-decoration:underline dotted}
 .article-footer{border-top:1px solid #c8ccd1;margin-top:30px;padding-top:10px;font-size:12px;color:#54595d}.catalog li{margin:6px 0}.catalog small{color:#72777d;margin-left:7px;font-size:11px}
 .catalog-note{font-size:13px;color:#54595d}img{max-width:100%;height:auto}[hidden]{display:none!important}
+.catalog-groups{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:15px;align-items:start}
+.catalog-group{border:1px solid #c8ccd1;padding:14px 16px;background:#fff;min-width:0}
+.catalog-group h3{display:flex;align-items:center;justify-content:space-between;gap:10px;font:21px/1.3 Georgia,serif;border-bottom:1px solid #eaecf0;margin:0 0 10px;padding-bottom:8px}
+.catalog-group h3 a{color:#202122}.category-count{font:12px/1.5 Arial,sans-serif;color:#72777d;background:#f8f9fa;border-radius:3px;padding:1px 6px}
+.catalog-group ul{margin:0;padding-left:16px;font-size:14px;line-height:1.5}.catalog-group li{margin:6px 0;break-inside:avoid}
+.catalog-group:not(.is-expanded) li:nth-child(n+7){display:none}.category-more{display:block;margin-top:13px;font-size:12px}
+.catalog-groups.is-focused{grid-template-columns:1fr}.catalog-groups.is-focused ul{columns:2;column-gap:35px}
+@media(max-width:1000px){.catalog-groups{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(min-width:1441px){.header{padding-left:max(15px,calc((100vw - 1440px)/2 + 15px))}}
-@media(max-width:680px){.header{gap:9px;padding:9px 14px}.brand{width:100%}.search{width:100%}.layout{grid-template-columns:1fr}.sidebar{padding:10px 16px;border-bottom:1px solid #c8ccd1}.sidebar h2,.sidebar .categories{display:none}.sidebar .navigation{display:flex;flex-wrap:wrap;gap:6px 16px;margin:0}.sidebar li{margin:0}main{border:0;padding:16px 17px 30px}h1{font-size:27px}h2{font-size:22px}.toc{padding:9px 12px}}
+@media(max-width:680px){.header{gap:9px;padding:9px 14px}.brand{width:100%}.search{width:100%}.layout{grid-template-columns:1fr}.sidebar{padding:10px 16px;border-bottom:1px solid #c8ccd1}.sidebar h2,.sidebar .categories{display:none}.sidebar .navigation{display:flex;flex-wrap:wrap;gap:6px 16px;margin:0}.sidebar li{margin:0}main{border:0;padding:16px 17px 30px}h1{font-size:27px}h2{font-size:22px}.toc{padding:9px 12px}.catalog-groups{grid-template-columns:1fr}.catalog-groups.is-focused ul{columns:1}}
 """
 
 
@@ -79,17 +88,21 @@ def rel(target: Path, current: Path) -> str:
     return quote(Path(os.path.relpath(target, current.parent)).as_posix(), safe="/#")
 
 
+def category_order(category: str):
+    return (CATEGORY_ORDER.index(category) if category in CATEGORY_ORDER else len(CATEGORY_ORDER), category)
+
+
 def shell(title: str, body: str, label: str, current: Path, out: Path, categories: Counter) -> str:
     catalog = rel(out / 'index.html', current)
-    category_links = ''.join(f'<li><a href="{catalog}?cat={quote(cat)}">{html.escape(CATEGORY_NAMES.get(cat, cat))} · {n}</a></li>'
-                             for cat, n in categories.most_common())
+    category_links = ''.join(f'<li><a href="{catalog}?cat={quote(cat)}#catalog">{html.escape(CATEGORY_NAMES.get(cat, cat))} · {categories[cat]}</a></li>'
+                             for cat in sorted(categories, key=category_order))
     return ('<!doctype html><html lang="ru"><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             '<meta name="robots" content="noindex,nofollow">'
             f'<title>{html.escape(title)} — Летопись · {FULL_NAME}</title><style>{STYLE}</style>'
             f'<header class="header"><a class="brand" href="{catalog}"><img src="{rel(out / "assets/logo.jpg", current)}" alt="{FULL_NAME}">'
             f'<span>Летопись<small>{FULL_NAME}</small></span></a>'
-            f'<form class="search" action="{catalog}" role="search"><input type="search" name="q" aria-label="Поиск статей" placeholder="Поиск по Летописи"><button>Найти</button></form>'
+            f'<form class="search" action="{catalog}#catalog" role="search"><input type="search" name="q" aria-label="Поиск статей" placeholder="Поиск по Летописи"><button>Найти</button></form>'
             f'<span class="archive-badge" title="{html.escape(label, quote=True)}">Версия · 05.10.2026</span></header>'
             '<div class="layout"><aside class="sidebar"><nav aria-label="Навигация"><h2>Навигация</h2><ul class="navigation">'
             f'<li><a href="{catalog}">Заглавная страница</a></li><li><a href="{catalog}?random=1">Случайная статья</a></li>'
@@ -148,20 +161,25 @@ def export(archive: Path, out: Path, label: str, source_accounting: Path | None 
         accounting = json.loads(accounting_bytes)
         if accounting['archive_sha256'] != manifest['archive_sha256']:
             raise ValueError('Source accounting belongs to a different Wiki archive')
-        groups = accounting['groups_by_export_file']
-        assert sum(g['unique_post_ids'] for g in groups) == accounting['unique_post_ids']
+        all_groups = accounting['groups_by_export_file']
+        assert sum(g['unique_post_ids'] for g in all_groups) == accounting['unique_post_ids']
+        # Display selection requested by the owner; retain the full accounting report.
+        groups = [g for g in all_groups if g['domain'] != 'club225166105']
+        displayed_posts = sum(g['unique_post_ids'] for g in groups)
         source_rows = ''.join(
             f'<tr><td><a href="https://vk.com/{quote(g["domain"], safe="")}">{html.escape(g["name"])}</a></td><td>{g["unique_post_ids"]}</td></tr>'
             for g in groups)
-        total = f'{accounting["unique_post_ids"]:,}'.replace(',', '\u202f')
+        total = f'{displayed_posts:,}'.replace(',', '\u202f')
         sources_html = ('<section aria-labelledby="sources-title"><h2 id="sources-title">Источники</h2>'
-                        f'<p>В сохранившемся журнале учтены <strong>{total} уникальные публикации</strong> из {len(groups)} экспортов сообществ.</p>'
+                        f'<p>В таблице представлены <strong>{total} публикаций</strong> из {len(groups)} экспортов сообществ.</p>'
                         '<table><thead><tr><th scope="col">Сообщество (экспорт)</th><th scope="col">Публикаций</th></tr></thead>'
                         f'<tbody>{source_rows}</tbody></table>'
                         '<p class="catalog-note">Подсчёт выполнен по отметкам в журнале и списке завершённых пакетов. '
                         'В составе экспортов могут встречаться репосты из других сообществ. '
                         'Количество публикаций не показывает полноту переноса сведений в статьи.</p></section>')
         manifest['source_accounting_sha256'] = digest(accounting_bytes)
+        manifest['source_summary'] = {'displayed_groups': len(groups), 'displayed_post_ids': displayed_posts,
+                                      'scope': 'owner_selected_export_groups_full_accounting_preserved'}
     for slug, page in articles.items():
         path = out / "pages" / (slug + ".html")
         raw = out / "markdown" / (slug + ".md")
@@ -225,24 +243,34 @@ def export(archive: Path, out: Path, label: str, source_accounting: Path | None 
         path.write_text(shell(page["title"], nav + rendered + footer, label, path, out, categories), encoding="utf-8")
         manifest["articles"][slug] = {"title": page["title"], "archive_member": page["member"],
                                       "sha256": digest(page["bytes"]), "html": path.relative_to(out).as_posix()}
-    rows = []
-    for slug in sorted(articles, key=lambda s: articles[s]["title"].casefold()):
-        title = articles[slug]["title"]
-        rows.append(f'<li data-category="{articles[slug]["category"]}"><a href="{rel(out / "pages" / (slug + ".html"), out / "index.html")}">{html.escape(title)}</a> <small>{html.escape(slug)}</small></li>')
-    body = ('<h1>Летопись</h1>'
+    groups_html = []
+    for category in sorted(categories, key=category_order):
+        slugs = [slug for slug in articles if articles[slug]['category'] == category]
+        slugs.sort(key=lambda s: (not bool(re.search('[А-Яа-яЁё]', articles[s]['title'])), articles[s]['title'].casefold()))
+        rows = [f'<li data-category="{category}"><a href="{rel(out / "pages" / (slug + ".html"), out / "index.html")}">{html.escape(articles[slug]["title"])}</a></li>' for slug in slugs]
+        link = f'index.html?cat={quote(category)}#catalog'
+        groups_html.append(f'<section class="catalog-group" data-group="{category}"><h3><a href="{link}">{html.escape(CATEGORY_NAMES.get(category, category))}</a>'
+                           f'<span class="category-count">{len(slugs)}</span></h3><ul>{"".join(rows)}</ul>'
+                           + (f'<a class="category-more" href="{link}">Все статьи категории →</a>' if len(slugs) > 6 else '') + '</section>')
+    body = ('<h1>Летопись Штаба СО КГЭУ «Тесла»</h1>'
             f'<p>{len(articles)} статей · Версия от 5 октября 2026 года.</p>'
-            '<section aria-label="О летописи"><p>Летопись — связанная база знаний о студенческих отрядах. '
-            f'В центре проекта — {FULL_NAME}: люди, события, проекты и традиции.</p>'
+            '<section aria-label="О летописи"><p>Летопись — база знаний о Штабе СО КГЭУ «Тесла»: '
+            'людях, событиях, проектах и традициях.</p>'
             '<p>Статьи подготовлены с использованием языковых моделей по материалам публикаций сообществ ВКонтакте. '
             'Внутренние ссылки объединяют связанные темы, а ссылки на источники помогают проверить сведения.</p>'
             '<p>Начните с поиска по названию, выберите категорию или откройте случайную статью. '
             'Содержание внутри статьи поможет перейти к нужному разделу.</p></section>'
-            + sources_html + '<h2>Каталог статей</h2>'
-            '<p id="count" class="catalog-note" aria-live="polite"></p><ul class="catalog" id="articles">' + "".join(rows) + '</ul>'
+            + sources_html + '<h2 id="catalog">Каталог статей</h2>'
+            '<p id="count" class="catalog-note" aria-live="polite"></p><div class="catalog-groups" id="articles">' + "".join(groups_html) + '</div>'
             '<footer class="article-footer"><a href="manifest.json">Сведения о версии</a></footer>'
             '<script>const input=document.querySelector("input[name=q]"),rows=[...document.querySelectorAll("#articles li")],params=new URLSearchParams(location.search);'
             'if(params.has("random"))location.replace(rows[Math.floor(Math.random()*rows.length)].querySelector("a").href);'
-            'input.value=params.get("q")||"";function filter(){let n=0;for(const r of rows){r.hidden=!!((params.get("cat")&&r.dataset.category!==params.get("cat"))||!r.textContent.toLocaleLowerCase("ru").includes(input.value.toLocaleLowerCase("ru")));if(!r.hidden)n++}document.getElementById("count").textContent="Найдено статей: "+n}input.addEventListener("input",filter);filter();</script>')
+            'input.value=params.get("q")||"";function filter(){const q=input.value.toLocaleLowerCase("ru").trim(),cat=params.get("cat");let n=0;'
+            'for(const r of rows){r.hidden=!!((cat&&r.dataset.category!==cat)||!r.textContent.toLocaleLowerCase("ru").includes(q));if(!r.hidden)n++}'
+            'document.getElementById("articles").classList.toggle("is-focused",!!cat);'
+            'for(const g of document.querySelectorAll(".catalog-group")){g.hidden=![...g.querySelectorAll("li")].some(r=>!r.hidden);g.classList.toggle("is-expanded",!!(q||cat));const more=g.querySelector(".category-more");if(more)more.hidden=!!(q||cat)}'
+            'document.getElementById("count").textContent=(q?"Найдено статей: ":cat?"Статей в категории: ":"Всего статей: ")+n}'
+            'input.addEventListener("input",filter);filter();</script>')
     (out / "index.html").write_text(shell("Каталог статей", body, label, out / 'index.html', out, categories), encoding="utf-8")
     (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {"articles": len(articles), "output": str(out), "archive_sha256": manifest["archive_sha256"],
