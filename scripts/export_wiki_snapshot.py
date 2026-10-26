@@ -73,6 +73,7 @@ def export(archive: Path, out: Path, label: str) -> dict:
     if out.exists():
         raise ValueError("Output must be a new directory")
     articles = {}
+    excluded_stub_pages = 0
     with tarfile.open(archive) as tar:
         for member in tar:
             slug = public_slug(member.name)
@@ -85,6 +86,9 @@ def export(archive: Path, out: Path, label: str) -> dict:
             front = re.match(r"\A---\r?\n(.*?)\r?\n---(?:\r?\n|$)", text, re.S)
             body = text[front.end():] if front else text
             meta = front.group(1) if front else ""
+            if re.search(r"(?m)^status:\s*stub\s*$", meta):
+                excluded_stub_pages += 1
+                continue
             heading = re.search(r"(?m)^#\s+(.+?)\s*$", body)
             alias = re.search(r"(?m)^slug:\s*['\"]?([a-z0-9_/]+)", meta)
             articles[slug] = {"bytes": data, "body": body, "title": heading.group(1) if heading else slug,
@@ -102,6 +106,7 @@ def export(archive: Path, out: Path, label: str) -> dict:
     out.mkdir(parents=True)
     manifest = {"archive": archive.name, "archive_sha256": digest(archive.read_bytes()),
                 "label": label, "articles": {}, "missing_wikilinks": [],
+                "excluded_stub_pages": excluded_stub_pages,
                 "renderer": {p: importlib.metadata.version(p) for p in ("markdown-it-py", "mdit-py-plugins")}}
     for slug, page in articles.items():
         path = out / "pages" / (slug + ".html")
@@ -119,7 +124,7 @@ def export(archive: Path, out: Path, label: str) -> dict:
                 text = re.sub(r"([\\\[\]])", r"\\\1", text)
                 return f'[{text}]({rel(out / "pages" / (dest + ".html"), path)})'
             manifest["missing_wikilinks"].append({"from": slug, "target": key})
-            return text + " (нет в этом снимке)"
+            return text + " (нет в опубликованной копии)"
 
         body = re.sub(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]", wikilink, page["body"])
         md = MarkdownIt("commonmark", {"html": False}).enable("table").enable("strikethrough").use(footnote_plugin)
