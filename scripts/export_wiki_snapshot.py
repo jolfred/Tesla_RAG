@@ -99,6 +99,7 @@ def shell(title: str, body: str, label: str, current: Path, out: Path, categorie
     return ('<!doctype html><html lang="ru"><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             '<meta name="robots" content="noindex,nofollow">'
+            f'<link rel="icon" type="image/jpeg" sizes="512x512" href="{rel(out / "assets/logo.jpg", current)}">'
             f'<title>{html.escape(title)} — Летопись · {FULL_NAME}</title><style>{STYLE}</style>'
             f'<header class="header"><a class="brand" href="{catalog}"><img src="{rel(out / "assets/logo.jpg", current)}" alt="{FULL_NAME}">'
             f'<span>Летопись<small>{FULL_NAME}</small></span></a>'
@@ -111,7 +112,8 @@ def shell(title: str, body: str, label: str, current: Path, out: Path, categorie
             f'<main>{body}</main></div></html>')
 
 
-def export(archive: Path, out: Path, label: str, source_accounting: Path | None = None) -> dict:
+def export(archive: Path, out: Path, label: str, source_accounting: Path | None = None,
+           collection_inventory: Path | None = None) -> dict:
     if out.exists():
         raise ValueError("Output must be a new directory")
     articles = {}
@@ -166,19 +168,37 @@ def export(archive: Path, out: Path, label: str, source_accounting: Path | None 
         # Display selection requested by the owner; retain the full accounting report.
         groups = [g for g in all_groups if g['domain'] != 'club225166105']
         displayed_posts = sum(g['unique_post_ids'] for g in groups)
+        collection = {}
+        if collection_inventory is not None:
+            collection_bytes = collection_inventory.read_bytes()
+            inventory = json.loads(collection_bytes)
+            if inventory.get('identity_implementation') != 'backend/wiki/ingest.py:identity':
+                raise ValueError('Collection inventory must use canonical VK wall IDs')
+            collection = {item['domain']: item for item in inventory['files']}
+            for group in groups:
+                item = collection[group['domain']]
+                assert not item['excluded_by_project_rules'] and not item['documented_ids_missing_from_export']
+            manifest['collection_inventory_sha256'] = digest(collection_bytes)
         source_rows = ''.join(
-            f'<tr><td><a href="https://vk.com/{quote(g["domain"], safe="")}">{html.escape(g["name"])}</a></td><td>{g["unique_post_ids"]}</td></tr>'
+            f'<tr><td><a href="https://vk.com/{quote(g["domain"], safe="")}">{html.escape(g["name"])}</a></td>'
+            f'<td>{collection[g["domain"]]["unique_post_ids"] if collection else "—"}</td><td>{g["unique_post_ids"]}</td></tr>'
             for g in groups)
         total = f'{displayed_posts:,}'.replace(',', '\u202f')
+        collected_total = sum(collection[g['domain']]['unique_post_ids'] for g in groups) if collection else None
+        collected_label = f'{collected_total:,}'.replace(',', '\u202f') if collection else None
         sources_html = ('<section aria-labelledby="sources-title"><h2 id="sources-title">Источники</h2>'
-                        f'<p>В таблице представлены <strong>{total} публикаций</strong> из {len(groups)} экспортов сообществ.</p>'
-                        '<table><thead><tr><th scope="col">Сообщество (экспорт)</th><th scope="col">Публикаций</th></tr></thead>'
+                        + (f'<p>В {len(groups)} сохранённых выгрузках — <strong>{collected_label} уникальных публикаций</strong>. '
+                           f'В журнале этой версии отмечены {total} из них.</p>' if collection else
+                           f'<p>В таблице представлены <strong>{total} публикаций</strong> из {len(groups)} экспортов сообществ.</p>')
+                        + '<table><thead><tr><th scope="col">Сообщество (экспорт)</th><th scope="col">Собрано</th><th scope="col">Учтено в журнале</th></tr></thead>'
                         f'<tbody>{source_rows}</tbody></table>'
-                        '<p class="catalog-note">Подсчёт выполнен по отметкам в журнале и списке завершённых пакетов. '
+                        '<p class="catalog-note">«Собрано» — число уникальных публикаций в сохранённых выгрузках. '
+                        '«Учтено в журнале» — публикации с отметками в журнале и списке завершённых пакетов. '
                         'В составе экспортов могут встречаться репосты из других сообществ. '
                         'Количество публикаций не показывает полноту переноса сведений в статьи.</p></section>')
         manifest['source_accounting_sha256'] = digest(accounting_bytes)
         manifest['source_summary'] = {'displayed_groups': len(groups), 'displayed_post_ids': displayed_posts,
+                                      'collected_post_ids_in_displayed_exports': collected_total,
                                       'scope': 'owner_selected_export_groups_full_accounting_preserved'}
     for slug, page in articles.items():
         path = out / "pages" / (slug + ".html")
@@ -283,5 +303,6 @@ if __name__ == "__main__":
     parser.add_argument("output", type=Path)
     parser.add_argument("--label", default="Версия от 5 октября 2026 года")
     parser.add_argument("--source-accounting", type=Path, help="Verified source-accounting report for this archive")
+    parser.add_argument("--collection-inventory", type=Path, help="Saved export counts using canonical VK wall IDs")
     args = parser.parse_args()
-    print(json.dumps(export(args.archive, args.output, args.label, args.source_accounting), ensure_ascii=False))
+    print(json.dumps(export(args.archive, args.output, args.label, args.source_accounting, args.collection_inventory), ensure_ascii=False))
