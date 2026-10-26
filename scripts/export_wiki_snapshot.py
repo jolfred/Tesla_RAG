@@ -90,7 +90,7 @@ def shell(title: str, body: str, label: str, current: Path, out: Path, categorie
             f'<header class="header"><a class="brand" href="{catalog}"><img src="{rel(out / "assets/logo.jpg", current)}" alt="{FULL_NAME}">'
             f'<span>Летопись<small>{FULL_NAME}</small></span></a>'
             f'<form class="search" action="{catalog}" role="search"><input type="search" name="q" aria-label="Поиск статей" placeholder="Поиск по Летописи"><button>Найти</button></form>'
-            f'<span class="archive-badge" title="{html.escape(label, quote=True)}">Архив · 05.10.2026</span></header>'
+            f'<span class="archive-badge" title="{html.escape(label, quote=True)}">Версия · 05.10.2026</span></header>'
             '<div class="layout"><aside class="sidebar"><nav aria-label="Навигация"><h2>Навигация</h2><ul class="navigation">'
             f'<li><a href="{catalog}">Заглавная страница</a></li><li><a href="{catalog}?random=1">Случайная статья</a></li>'
             '<li><a href="https://sotesla.ru/">На основной сайт</a></li></ul>'
@@ -137,7 +137,7 @@ def export(archive: Path, out: Path, label: str) -> dict:
     (out / 'assets').mkdir()
     shutil.copyfile(Path(__file__).resolve().parents[1] / 'frontend/src/assets/logos/tesla.jpg', out / 'assets/logo.jpg')
     categories = Counter(page['category'] for page in articles.values())
-    manifest = {"archive": archive.name, "archive_sha256": digest(archive.read_bytes()),
+    manifest = {"source_version": "2026-10-05", "archive_sha256": digest(archive.read_bytes()),
                 "label": label, "articles": {}, "missing_wikilinks": [],
                 "excluded_stub_pages": excluded_stub_pages,
                 "presentation": "wiki_reference_layout_v2",
@@ -201,7 +201,7 @@ def export(archive: Path, out: Path, label: str) -> dict:
             rendered = rendered.replace('<h2 ', contents + '<h2 ', 1) if '<h2 ' in rendered else contents + rendered
         nav = (f'<a class="back" href="{rel(out / "index.html", path)}">← Все статьи</a>'
                '<p class="subtitle">Материал из отрядной википедии</p>')
-        footer = f'<footer class="article-footer"><a href="{rel(raw, path)}">Исходный текст статьи</a> · <a href="{rel(out / "manifest.json", path)}">Состав архивной копии</a></footer>'
+        footer = f'<footer class="article-footer"><a href="{rel(raw, path)}">Исходный текст статьи</a> · <a href="{rel(out / "manifest.json", path)}">Сведения о версии</a></footer>'
         path.write_text(shell(page["title"], nav + rendered + footer, label, path, out, categories), encoding="utf-8")
         manifest["articles"][slug] = {"title": page["title"], "archive_member": page["member"],
                                       "sha256": digest(page["bytes"]), "html": path.relative_to(out).as_posix()}
@@ -209,14 +209,14 @@ def export(archive: Path, out: Path, label: str) -> dict:
     for slug in sorted(articles, key=lambda s: articles[s]["title"].casefold()):
         title = articles[slug]["title"]
         rows.append(f'<li data-category="{articles[slug]["category"]}"><a href="{rel(out / "pages" / (slug + ".html"), out / "index.html")}">{html.escape(title)}</a> <small>{html.escape(slug)}</small></li>')
-    body = ('<h1>Летопись до массовой обработки</h1>'
-            f'<p>{len(articles)} сохранённых статей. Дата архива — 5 октября 2026 года.</p>'
+    body = ('<h1>Летопись</h1>'
+            f'<p>{len(articles)} статей · Версия от 5 октября 2026 года.</p>'
             '<p id="count" class="catalog-note" aria-live="polite"></p><ul class="catalog" id="articles">' + "".join(rows) + '</ul>'
-            '<footer class="article-footer"><a href="manifest.json">Состав архива и контрольные суммы</a></footer>'
+            '<footer class="article-footer"><a href="manifest.json">Сведения о версии</a></footer>'
             '<script>const input=document.querySelector("input[name=q]"),rows=[...document.querySelectorAll("#articles li")],params=new URLSearchParams(location.search);'
             'if(params.has("random"))location.replace(rows[Math.floor(Math.random()*rows.length)].querySelector("a").href);'
             'input.value=params.get("q")||"";function filter(){let n=0;for(const r of rows){r.hidden=!!((params.get("cat")&&r.dataset.category!==params.get("cat"))||!r.textContent.toLocaleLowerCase("ru").includes(input.value.toLocaleLowerCase("ru")));if(!r.hidden)n++}document.getElementById("count").textContent="Найдено статей: "+n}input.addEventListener("input",filter);filter();</script>')
-    (out / "index.html").write_text(shell("Каталог старой вики", body, label, out / 'index.html', out, categories), encoding="utf-8")
+    (out / "index.html").write_text(shell("Каталог статей", body, label, out / 'index.html', out, categories), encoding="utf-8")
     (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {"articles": len(articles), "output": str(out), "archive_sha256": manifest["archive_sha256"],
             "missing_wikilinks": len(manifest["missing_wikilinks"])}
@@ -226,6 +226,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("archive", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--label", default="Снимок до массовой обработки · архив от 5 октября 2026")
+    parser.add_argument("--label", default="Версия от 5 октября 2026 года")
     args = parser.parse_args()
     print(json.dumps(export(args.archive, args.output, args.label), ensure_ascii=False))
