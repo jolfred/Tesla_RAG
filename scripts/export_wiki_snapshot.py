@@ -98,7 +98,7 @@ def shell(title: str, body: str, label: str, current: Path, out: Path, categorie
             f'<main>{body}</main></div></html>')
 
 
-def export(archive: Path, out: Path, label: str) -> dict:
+def export(archive: Path, out: Path, label: str, source_accounting: Path | None = None) -> dict:
     if out.exists():
         raise ValueError("Output must be a new directory")
     articles = {}
@@ -142,6 +142,26 @@ def export(archive: Path, out: Path, label: str) -> dict:
                 "excluded_stub_pages": excluded_stub_pages,
                 "presentation": "wiki_reference_layout_v2",
                 "renderer": {p: importlib.metadata.version(p) for p in ("markdown-it-py", "mdit-py-plugins")}}
+    sources_html = ''
+    if source_accounting is not None:
+        accounting_bytes = source_accounting.read_bytes()
+        accounting = json.loads(accounting_bytes)
+        if accounting['archive_sha256'] != manifest['archive_sha256']:
+            raise ValueError('Source accounting belongs to a different Wiki archive')
+        groups = accounting['groups_by_export_file']
+        assert sum(g['unique_post_ids'] for g in groups) == accounting['unique_post_ids']
+        source_rows = ''.join(
+            f'<tr><td><a href="https://vk.com/{quote(g["domain"], safe="")}">{html.escape(g["name"])}</a></td><td>{g["unique_post_ids"]}</td></tr>'
+            for g in groups)
+        total = f'{accounting["unique_post_ids"]:,}'.replace(',', '\u202f')
+        sources_html = ('<section aria-labelledby="sources-title"><h2 id="sources-title">Источники</h2>'
+                        f'<p>В сохранившемся журнале учтены <strong>{total} уникальные публикации</strong> из {len(groups)} экспортов сообществ.</p>'
+                        '<table><thead><tr><th scope="col">Сообщество (экспорт)</th><th scope="col">Публикаций</th></tr></thead>'
+                        f'<tbody>{source_rows}</tbody></table>'
+                        '<p class="catalog-note">Подсчёт выполнен по отметкам в журнале и списке завершённых пакетов. '
+                        'В составе экспортов могут встречаться репосты из других сообществ. '
+                        'Количество публикаций не показывает полноту переноса сведений в статьи.</p></section>')
+        manifest['source_accounting_sha256'] = digest(accounting_bytes)
     for slug, page in articles.items():
         path = out / "pages" / (slug + ".html")
         raw = out / "markdown" / (slug + ".md")
@@ -211,6 +231,13 @@ def export(archive: Path, out: Path, label: str) -> dict:
         rows.append(f'<li data-category="{articles[slug]["category"]}"><a href="{rel(out / "pages" / (slug + ".html"), out / "index.html")}">{html.escape(title)}</a> <small>{html.escape(slug)}</small></li>')
     body = ('<h1>Летопись</h1>'
             f'<p>{len(articles)} статей · Версия от 5 октября 2026 года.</p>'
+            '<section aria-label="О летописи"><p>Летопись — связанная база знаний о студенческих отрядах. '
+            f'В центре проекта — {FULL_NAME}: люди, события, проекты и традиции.</p>'
+            '<p>Статьи подготовлены с использованием языковых моделей по материалам публикаций сообществ ВКонтакте. '
+            'Внутренние ссылки объединяют связанные темы, а ссылки на источники помогают проверить сведения.</p>'
+            '<p>Начните с поиска по названию, выберите категорию или откройте случайную статью. '
+            'Содержание внутри статьи поможет перейти к нужному разделу.</p></section>'
+            + sources_html + '<h2>Каталог статей</h2>'
             '<p id="count" class="catalog-note" aria-live="polite"></p><ul class="catalog" id="articles">' + "".join(rows) + '</ul>'
             '<footer class="article-footer"><a href="manifest.json">Сведения о версии</a></footer>'
             '<script>const input=document.querySelector("input[name=q]"),rows=[...document.querySelectorAll("#articles li")],params=new URLSearchParams(location.search);'
@@ -227,5 +254,6 @@ if __name__ == "__main__":
     parser.add_argument("archive", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--label", default="Версия от 5 октября 2026 года")
+    parser.add_argument("--source-accounting", type=Path, help="Verified source-accounting report for this archive")
     args = parser.parse_args()
-    print(json.dumps(export(args.archive, args.output, args.label), ensure_ascii=False))
+    print(json.dumps(export(args.archive, args.output, args.label, args.source_accounting), ensure_ascii=False))
