@@ -61,6 +61,28 @@ class StudyBoundaryTests(unittest.TestCase):
         prepare.write_json(folder / "checksums.json", study_run.files(folder))
         return folder
 
+    def record_fixture(self, name, arm="openwiki", previous=None, retention=True, status="passed"):
+        folder = self.root / "runtime-checks" / self.snapshot.name / name
+        attempt = {"snapshot_id": self.snapshot.name, "arm": arm, "synthetic": arm,
+                   "transport": "native-linux", "check_only": False}
+        if previous:
+            attempt.update(synthetic_previous_attempt=previous.name,
+                synthetic_previous_checksums_sha256=prepare.sha((previous / "checksums.json").read_bytes()))
+        prepare.write_json(folder / "attempt.json", attempt)
+        prepare.write_json(folder / "coordinator-report.json", {"returncode": 0})
+        prepare.write_json(folder / "output/launcher-report.json", {"returncode": 0})
+        result = folder / "output/result"
+        report_name = "fixture-report.json" if arm == "tesla" else "report.json"
+        prepare.write_json(result / report_name, {"status": status, "study_data_used": False,
+            "command": "update" if previous else "init", "month": "2024-02" if previous else "2024-01",
+            "old_fact_retention_checked": bool(previous) and retention})
+        page = result / "home/wiki/page.md"
+        page.parent.mkdir(parents=True)
+        page.write_text("January fact\n" + ("February fact\n" if previous else ""), encoding="utf-8")
+        prepare.write_json(result / "checksums.json", study_run.files(result))
+        prepare.write_json(folder / "checksums.json", study_run.files(folder))
+        return folder
+
     def invoke(self, launcher, **kwargs):
         with patch.object(study_run, "PRIVATE", self.root), patch.object(study_run.sys, "platform", "linux"), \
                 patch.object(study_run, "schedule_lock", return_value=nullcontext()), \
@@ -130,6 +152,67 @@ class StudyBoundaryTests(unittest.TestCase):
         result = self.invoke(self.launcher, synthetic="openwiki")
         self.assertEqual(result["coordinator_exit"], 0)
         self.assertEqual(set(p.name for p in (self.job / "inputs").iterdir()), {"job-config.json"})
+
+    def test_synthetic_openwiki_update_uses_verified_init_without_reading_corpus(self):
+        self.frozen_runtime()
+        init = self.record_fixture("openwiki-init")
+        original = study_run.verify_evidence(init)
+        with patch.object(study_run, "job_inputs", side_effect=AssertionError("Historical input was read")):
+            result = self.invoke(self.launcher, synthetic="openwiki", synthetic_previous=init)
+        self.assertEqual(result["coordinator_exit"], 0)
+        previous = Path(self.sandbox["previous"])
+        study_run.verify_evidence(previous)
+        self.assertEqual((previous / "home/wiki/page.md").read_text(encoding="utf-8"), "January fact\n")
+        attempt = json.loads((Path(result["folder"]) / "attempt.json").read_text(encoding="utf-8"))
+        self.assertEqual(attempt["synthetic_previous_attempt"], init.name)
+        self.assertEqual(attempt["synthetic_previous_checksums_sha256"], prepare.sha((init / "checksums.json").read_bytes()))
+        self.assertEqual(study_run.verify_evidence(init), original)
+        self.assertEqual({p.name for p in (self.job / "inputs").iterdir()}, {"job-config.json"})
+
+    def test_readiness_requires_openwiki_update_with_retention_and_frozen_init(self):
+        init = self.record_fixture("openwiki-init")
+        self.record_fixture("tesla-fixture", arm="tesla")
+        with patch.object(study_run, "PRIVATE", self.root):
+            self.assertEqual(study_run.readiness(self.snapshot),
+                {"ready": False, "checks": {"isolation": True, "openwiki": False, "tesla": True}})
+            self.record_fixture("openwiki-update-without-retention", previous=init, retention=False)
+            self.assertFalse(study_run.readiness(self.snapshot)["ready"])
+            self.record_fixture("openwiki-update", previous=init)
+            self.assertTrue(study_run.readiness(self.snapshot)["ready"])
+
+    def test_synthetic_update_rejects_foreign_or_unsuccessful_init(self):
+        init = self.record_fixture("openwiki-init")
+        failed = self.record_fixture("openwiki-failed-init", status="failed")
+        other_snapshot = self.root / "snapshots" / ("b" * 20)
+        with patch.object(study_run, "PRIVATE", self.root):
+            with self.assertRaisesRegex(ValueError, "this snapshot"):
+                study_run.synthetic_openwiki_previous(other_snapshot, init)
+            with self.assertRaisesRegex(ValueError, "successful isolated"):
+                study_run.synthetic_openwiki_previous(self.snapshot, failed)
+
+    def test_readiness_rejects_resealed_init_after_update(self):
+        init = self.record_fixture("openwiki-init")
+        self.record_fixture("openwiki-update", previous=init)
+        # Even internally valid replacement evidence cannot change an update's predecessor.
+        (init / "output/result/home/wiki/page.md").write_text("Replacement\n", encoding="utf-8")
+        prepare.write_json(init / "output/result/checksums.json", study_run.files(init / "output/result"))
+        prepare.write_json(init / "checksums.json", study_run.files(init))
+        with patch.object(study_run, "PRIVATE", self.root):
+            with self.assertRaisesRegex(ValueError, "init evidence manifest changed"):
+                study_run.readiness(self.snapshot)
+
+    def test_failed_synthetic_update_preserves_init_and_its_own_evidence(self):
+        self.frozen_runtime()
+        init = self.record_fixture("openwiki-init")
+        original = study_run.verify_evidence(init)
+        def failed(command, stdout, stderr):
+            return self.launcher(command, stdout, stderr, process_exit=17, launcher_exit=17)
+        result = self.invoke(failed, synthetic="openwiki", synthetic_previous=init)
+        self.assertEqual(result["coordinator_exit"], 1)
+        study_run.verify_evidence(Path(result["folder"]))
+        self.assertEqual(study_run.verify_evidence(init), original)
+        with patch.object(study_run, "PRIVATE", self.root):
+            self.assertFalse(study_run.readiness(self.snapshot)["checks"]["openwiki"])
 
     def test_secret_redaction_is_preserved_and_stops_schedule(self):
         self.frozen_runtime()

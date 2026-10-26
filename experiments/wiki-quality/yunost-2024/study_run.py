@@ -77,6 +77,32 @@ def previous_result(snapshot, pair, arm):
     return checkpoint
 
 
+def synthetic_openwiki_previous(snapshot, folder, expected_checksum=None):
+    """Accept only a preserved successful init from this snapshot's runtime checks."""
+    folder = Path(folder)
+    if folder.is_symlink(): raise ValueError("Synthetic init attempt must not be a link")
+    folder = folder.resolve(strict=True)
+    root = (PRIVATE / "runtime-checks" / snapshot.name).resolve()
+    if folder.parent != root:
+        raise ValueError("Synthetic init must belong to this snapshot's runtime checks")
+    verify_evidence(folder)
+    if expected_checksum is not None and prepare.sha((folder / "checksums.json").read_bytes()) != expected_checksum:
+        raise ValueError("Synthetic init evidence manifest changed")
+    attempt = json.loads((folder / "attempt.json").read_text(encoding="utf-8"))
+    launch = json.loads((folder / "output/launcher-report.json").read_text(encoding="utf-8"))
+    checkpoint = folder / "output/result"
+    report = json.loads((checkpoint / "report.json").read_text(encoding="utf-8"))
+    if (not coordinator_ok(folder) or launch.get("returncode") != 0
+            or attempt.get("transport") != "native-linux" or attempt.get("snapshot_id") != snapshot.name
+            or attempt.get("synthetic") != "openwiki" or attempt.get("arm") != "openwiki"
+            or attempt.get("check_only") or report.get("status") != "passed"
+            or report.get("study_data_used") is not False or report.get("command") != "init"
+            or report.get("month") != "2024-01"):
+        raise ValueError("Synthetic update requires a successful isolated OpenWiki init")
+    verify_evidence(checkpoint)
+    return checkpoint
+
+
 def readiness(snapshot):
     """Require preserved live fixtures in the very same frozen job runtime."""
     root = PRIVATE / "runtime-checks" / snapshot.name
@@ -96,6 +122,16 @@ def readiness(snapshot):
         if attempt.get("synthetic") and report_file.exists():
             report = json.loads(report_file.read_text(encoding="utf-8"))
             if report.get("status") == "passed" and report.get("study_data_used") is False:
+                if attempt["arm"] == "openwiki":
+                    if (report.get("command") != "update" or report.get("month") != "2024-02"
+                            or report.get("old_fact_retention_checked") is not True):
+                        continue
+                    previous_name = attempt.get("synthetic_previous_attempt")
+                    previous_checksum = attempt.get("synthetic_previous_checksums_sha256")
+                    if (not previous_name or Path(previous_name).name != previous_name
+                            or not isinstance(previous_checksum, str) or len(previous_checksum) != 64):
+                        continue
+                    synthetic_openwiki_previous(snapshot, root / previous_name, previous_checksum)
                 passed[attempt["arm"]] = True
     return {"ready": all(passed.values()), "checks": passed}
 
@@ -181,16 +217,18 @@ def collect_evidence(job, folder, secrets):
     return redacted
 
 
-def run(snapshot, check=False, synthetic=None, runtime_config=None):
+def run(snapshot, check=False, synthetic=None, runtime_config=None, synthetic_previous=None):
     if sys.platform != "linux": raise RuntimeError("Native Linux is required; no WSL fallback")
     if runtime_config is None: raise ValueError("--runtime-config is required")
     runtime_config = Path(runtime_config).resolve(strict=True)
     runtime = runtime_paths(runtime_config)
     with schedule_lock():
-        return run_locked(snapshot, runtime, runtime_config, check, synthetic)
+        return run_locked(snapshot, runtime, runtime_config, check, synthetic, synthetic_previous)
 
 
-def run_locked(snapshot, runtime, runtime_config, check, synthetic):
+def run_locked(snapshot, runtime, runtime_config, check, synthetic, synthetic_previous=None):
+    if synthetic_previous is not None and (check or synthetic != "openwiki"):
+        raise ValueError("--synthetic-previous is only for an OpenWiki synthetic update")
     prepare.verify(snapshot)
     for protected in (snapshot, PRIVATE / "executions", PRIVATE / "runtime-checks"):
         if runtime["job_root"] == protected or runtime["job_root"].is_relative_to(protected):
@@ -201,10 +239,12 @@ def run_locked(snapshot, runtime, runtime_config, check, synthetic):
     if chosen is None: return {"status": "all_monthly_jobs_completed"}
     pair, arm = chosen
     if synthetic: arm = synthetic
+    synthetic_prior = synthetic_openwiki_previous(snapshot, synthetic_previous) if synthetic_previous is not None else None
     name = step_name(pair, arm)
     if check or synthetic:
         from datetime import datetime, timezone
-        name += ("-check-" if check else "-fixture-") + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+        phase = "-check-" if check else ("-fixture-update-" if synthetic_prior else "-fixture-init-")
+        name += phase + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
     auth = json.loads(runtime["auth_file"].read_text(encoding="utf-8"))
     if auth.get("auth_mode") != "chatgpt": raise ValueError("ChatGPT subscription login required")
     secrets = sorted({value for value in auth.get("tokens", {}).values() if isinstance(value, str) and value},
@@ -219,19 +259,20 @@ def run_locked(snapshot, runtime, runtime_config, check, synthetic):
     try:
         prepare.write_json(folder / "attempt.json", {"snapshot_id": snapshot.name, "pair": pair,
             "arm": arm, "check_only": check, "synthetic": synthetic, "transport": "native-linux",
+            "synthetic_previous_attempt": synthetic_prior.parent.parent.name if synthetic_prior else None,
+            "synthetic_previous_checksums_sha256": prepare.sha((synthetic_prior.parent.parent / "checksums.json").read_bytes()) if synthetic_prior else None,
             "linux_job": str(job), "runtime_config_sha256": prepare.sha(runtime_config.read_bytes()),
             "snapshot_checksums_sha256": prepare.sha((snapshot / "checksums.json").read_bytes()),
             "runtime_lock_sha256": prepare.sha((snapshot / "preparation/runtime-lock.json").read_bytes()),
             "export_exclusions": ["output/result/native (preserved in linux_job; pinned compiler source)"]})
         job.mkdir(parents=True, exist_ok=False, mode=0o700)
         job_created = True
-        blobs, config = job_inputs(snapshot, pair, arm)
-        if synthetic == "openwiki": blobs, config = {}, {}
+        blobs, config = ({}, {}) if synthetic == "openwiki" else job_inputs(snapshot, pair, arm)
         if synthetic == "tesla":
             blobs.pop("posts.jsonl")
             blobs.update({"canon/rules.md": blobs["rules.md"], "canon/rules_mapping.md": blobs["rules_mapping.md"]})
             config = {}
-        prior = None if synthetic else previous_result(snapshot, pair, arm)
+        prior = synthetic_prior if synthetic else previous_result(snapshot, pair, arm)
         if prior:
             config["previous_checksums_sha256"] = prepare.sha((prior / "checksums.json").read_bytes())
             if arm == "tesla": config["previous"] = VIRTUAL + "/checkpoints/previous"
@@ -297,8 +338,9 @@ if __name__ == "__main__":
     parser.add_argument("--runtime-config", type=Path, required=True)
     parser.add_argument("--check-only", action="store_true")
     parser.add_argument("--synthetic", choices=("openwiki", "tesla"))
+    parser.add_argument("--synthetic-previous", type=Path, help="Preserved successful OpenWiki synthetic init attempt")
     args = parser.parse_args()
-    result = run(args.snapshot.resolve(), args.check_only, args.synthetic, args.runtime_config)
+    result = run(args.snapshot.resolve(), args.check_only, args.synthetic, args.runtime_config, args.synthetic_previous)
     print(json.dumps(result, ensure_ascii=False), flush=True)
     if result.get("job_exit") or result.get("coordinator_exit") or (result.get("launcher") or {}).get("returncode", 0):
         raise SystemExit(1)

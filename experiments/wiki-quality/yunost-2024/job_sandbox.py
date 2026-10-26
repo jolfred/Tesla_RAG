@@ -140,7 +140,7 @@ import {SqliteSaver} from '/vendor/node_modules/@langchain/langgraph-checkpoint-
 import {resolveReasoningConfig} from '/vendor/dist/config/reasoning.js';
 const saver = await SqliteSaver.fromConnString(':memory:');
 assert.equal(await saver.getTuple({configurable:{thread_id:'runtime-probe',checkpoint_ns:''}}),undefined);
-assert.deepEqual(resolveReasoningConfig('openai-chatgpt','gpt-6-luna'),
+assert.deepEqual(resolveReasoningConfig('openai-chatgpt','gpt-6-luna',{OPENWIKI_REASONING_EFFORT:'medium'}),
  {effort:'medium',transport:'responses-reasoning'});"""
     subprocess.run(["node", "--input-type=module", "-e", node_check], check=True)
     subprocess.run(["codex", "--check-cli-isolation"], check=True, stdout=subprocess.DEVNULL)

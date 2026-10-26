@@ -1,7 +1,7 @@
 {
   "study_id": "yunost-2024-system-comparison-v1",
   "status": "native_server_execution_prepared_runtime_checks_required",
-  "revision": 5,
+  "revision": 6,
   "source_file": "storage/posts/posts_spoyunost2020.jsonl",
   "source_domain": "spoyunost2020",
   "group_id": "198864697",
@@ -19,6 +19,7 @@
   "planned_repetitions": 5,
   "allocation_seed": 20241020,
   "execution_concurrency": 1,
+  "compatibility_checks_required": ["isolated_runtime", "tesla_two_month_fixture", "openwiki_init_and_linked_update_with_retention"],
   "provider_fallback": false,
   "primary_outcomes": ["supported_fact_recall", "unsupported_output_claim_rate"],
   "secondary_outcomes": ["retention_of_previously_covered_facts", "structural_errors", "execution_failures", "tokens", "wall_clock_seconds"],
